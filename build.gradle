@@ -1,8 +1,4 @@
-/**
- * Top-level build file for ftc_app project.
- *
- * It is extraordinarily rare that you will ever need to edit this file.
- */
+// build.gradle (Root Project)
 
 buildscript {
     repositories {
@@ -15,15 +11,7 @@ buildscript {
     }
 }
 
-// This is now required because aapt2 has to be downloaded from the
-// google() repository beginning with version 3.2 of the Android Gradle Plugin
+// The allprojects block below is now empty, as its contents were the cause of the error.
 allprojects {
-    repositories {
-        mavenCentral()
-        google()
-    }
-}
-
-repositories {
-    mavenCentral()
+    // Repositories are now managed in settings.gradle
 }

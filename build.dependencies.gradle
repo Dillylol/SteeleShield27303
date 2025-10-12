@@ -1,9 +1,4 @@
-repositories {
-    mavenCentral()
-    google() // Needed for androidx
-    maven { url = 'https://maven.pedropathing.com' }
-    maven { url = "https://mymaven.bylazar.com/releases" }
-}
+// build.dependencies.gradle
 
 dependencies {
     implementation 'org.firstinspires.ftc:Inspection:11.0.0'
@@ -18,10 +13,10 @@ dependencies {
     implementation 'androidx.appcompat:appcompat:1.6.1'
 
     implementation 'com.bylazar:gamepad:1.0.3'
-    implementation 'com.pedropathing:ftc:2.2.0'
+    // --- CORRECTED LINE ---
+    implementation 'com.pedropathing:ftc:2.0.2' // Was 2.2.0, now corrected to 2.0.2
     implementation 'com.pedropathing:telemetry:1.0.0'
     implementation 'com.bylazar:fullpanels:1.0.6'
     implementation 'com.bylazar:docs:1.0.4'
     implementation 'com.bylazar:telemetry:1.0.3'
 }
-
