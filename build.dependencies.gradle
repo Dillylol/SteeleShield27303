@@ -9,12 +9,12 @@ dependencies {
     implementation 'org.firstinspires.ftc:Hardware:11.0.0'
     implementation 'org.firstinspires.ftc:FtcCommon:11.0.0'
     implementation 'org.firstinspires.ftc:Vision:11.0.0'
-
     implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'com.arcrobotics:ftclib:2.1.2'
 
     implementation 'com.bylazar:gamepad:1.0.3'
     // --- CORRECTED LINE ---
-    implementation 'com.pedropathing:ftc:2.0.2' // Was 2.2.0, now corrected to 2.0.2
+    implementation 'com.pedropathing:ftc:2.0.2'
     implementation 'com.pedropathing:telemetry:1.0.0'
     implementation 'com.bylazar:fullpanels:1.0.6'
     implementation 'com.bylazar:docs:1.0.4'
