@@ -44,10 +44,10 @@ public class BotelloDATA extends OpMode {
     @Override
     public void init() {
         // Map drive
-        BackL  = hardwareMap.get(DcMotor.class, "BackL");
-        BackR  = hardwareMap.get(DcMotor.class, "BackR");
-        FrontL = hardwareMap.get(DcMotor.class, "FrontL");
-        FrontR = hardwareMap.get(DcMotor.class, "FrontR");
+        BackL  = hardwareMap.get(DcMotor.class, "lr");
+        BackR  = hardwareMap.get(DcMotor.class, "rr");
+        FrontL = hardwareMap.get(DcMotor.class, "lf");
+        FrontR = hardwareMap.get(DcMotor.class, "rf");
 
         // Map mechanisms as DcMotorEx
         Intake = hardwareMap.get(DcMotorEx.class, "Intake");

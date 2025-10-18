@@ -21,30 +21,31 @@ public class Constants {
             .leftFrontMotorDirection(DcMotorSimple.Direction.REVERSE)
             .leftRearMotorDirection(DcMotorSimple.Direction.REVERSE)
             .rightFrontMotorDirection(DcMotorSimple.Direction.REVERSE)
-            .rightRearMotorDirection(DcMotorSimple.Direction.REVERSE);
+            .rightRearMotorDirection(DcMotorSimple.Direction.REVERSE)
+            .xVelocity(60.21290556068724)
+            .yVelocity(46.9671264592000285);
 
 
     public static ThreeWheelIMUConstants localizerConstants = new ThreeWheelIMUConstants()
             .forwardTicksToInches(.001989436789)
             .strafeTicksToInches(.001989436789)
             .turnTicksToInches(.001989436789)
-            .leftPodY(1)
-            .rightPodY(-1)
+            .leftPodY(2.5)
+            .rightPodY(-2.5)
             .strafePodX(-2.5)
-            .leftEncoder_HardwareMapName("leftFront")
-            .rightEncoder_HardwareMapName("rightRear")
-            .strafeEncoder_HardwareMapName("rightFront")
+            .leftEncoder_HardwareMapName("lf")
+            .rightEncoder_HardwareMapName("lr")
+            .strafeEncoder_HardwareMapName("rf")
             .leftEncoderDirection(Encoder.FORWARD)
             .rightEncoderDirection(Encoder.FORWARD)
             .strafeEncoderDirection(Encoder.FORWARD)
             .IMU_HardwareMapName("imu")
-            .IMU_Orientation(new RevHubOrientationOnRobot(RevHubOrientationOnRobot.LogoFacingDirection.UP, RevHubOrientationOnRobot.UsbFacingDirection.LEFT));
-            //.forwardTicksToInches(multiplier)
-            //.strafeTicksToInches(multiplier)
-            //.turnTicksToInches(multiplier)
-    public static FollowerConstants followerConstants = new FollowerConstants()
-            .mass(5);
+            .IMU_Orientation(new RevHubOrientationOnRobot(RevHubOrientationOnRobot.LogoFacingDirection.RIGHT, RevHubOrientationOnRobot.UsbFacingDirection.UP));
 
+    public static FollowerConstants followerConstants = new FollowerConstants()
+            .mass(6.123)
+            .forwardZeroPowerAcceleration(-48.046454662933335)
+            .lateralZeroPowerAcceleration(-77.3308376085305975);
 
     public static PathConstraints pathConstraints = new PathConstraints(0.99, 100, 1, 1);
 
