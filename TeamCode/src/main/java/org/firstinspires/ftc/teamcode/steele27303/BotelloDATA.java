@@ -7,6 +7,7 @@ import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.IMU;
+import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.hardware.VoltageSensor;
 
 import org.firstinspires.ftc.robotcore.external.Telemetry;
@@ -21,6 +22,9 @@ public class BotelloDATA extends OpMode {
     // Mechanisms (use DcMotorEx so we can read velocity)
     private DcMotorEx Intake, Wheel;
 
+    // Auto-lift servo (stays lowered, lifts only when wheel velocity >= threshold)
+    private Servo Lift;
+
     // Panels telemetry
     private final Telemetry panels = PanelsTelemetry.INSTANCE.getFtcTelemetry();
 
@@ -28,9 +32,7 @@ public class BotelloDATA extends OpMode {
     private IMU imu;
 
     // Toggles
-    private boolean isIntakeOn = false;
-    private boolean isWheelOn  = false;
-    private boolean aWasPressed = false;
+    private boolean isWheelOn  = false;   // B toggles this
     private boolean bWasPressed = false;
 
     // REV-41-1600 (28 CPR) * gear ratio => ticks per output revolution
@@ -40,6 +42,22 @@ public class BotelloDATA extends OpMode {
 
     private static final double INTAKE_TPR = MOTOR_ENCODER_CPR * INTAKE_GEAR_RATIO; // 560 for 20:1
     private static final double WHEEL_TPR  = MOTOR_ENCODER_CPR * WHEEL_GEAR_RATIO;  // 28 for 1:1
+
+    // ===== Servo config =====
+    // Positions: tune to your linkage. 0.0..1.0 range.
+    private static final double LIFT_LOWERED_POS = 0.10; // resting (default)
+    private static final double LIFT_RAISED_POS  = 0.85; // raised only when wheel is fast enough
+
+    // Velocity thresholds using MotorEx.getVelocity() [ticks/second].
+    // Use a little hysteresis to avoid chatter near the threshold.
+    // Example: lift when wheel >= ~500 RPM and lower again when <= ~450 RPM
+    // RPM to TPS: TPS = (RPM/60) * TPR
+    private static final double LIFT_ON_RPM  = 500.0;  // raise at/above this wheel speed
+    private static final double LIFT_OFF_RPM = 450.0;  // lower at/below this wheel speed
+    private static final double LIFT_ON_TPS  = (LIFT_ON_RPM / 60.0) * WHEEL_TPR;
+    private static final double LIFT_OFF_TPS = (LIFT_OFF_RPM / 60.0) * WHEEL_TPR;
+
+    private boolean liftIsRaised = false; // track last servo state for hysteresis
 
     @Override
     public void init() {
@@ -52,6 +70,9 @@ public class BotelloDATA extends OpMode {
         // Map mechanisms as DcMotorEx
         Intake = hardwareMap.get(DcMotorEx.class, "Intake");
         Wheel  = hardwareMap.get(DcMotorEx.class, "Wheel");
+
+        // Map servo (set your actual config name)
+        Lift   = hardwareMap.get(Servo.class, "Lift");
 
         // Directions same as before
         FrontL.setDirection(DcMotor.Direction.REVERSE);
@@ -73,6 +94,10 @@ public class BotelloDATA extends OpMode {
         // Wheel left FLOAT if you prefer; otherwise:
         // Wheel.setZeroPowerBehavior(brake);
 
+        // Servo default: stay lowered on init
+        Lift.setPosition(LIFT_LOWERED_POS);
+        liftIsRaised = false;
+
         // IMU setup (use your RIGHT/UP mount)
         imu = hardwareMap.get(IMU.class, "imu");
         IMU.Parameters params = new IMU.Parameters(new RevHubOrientationOnRobot(
@@ -80,7 +105,7 @@ public class BotelloDATA extends OpMode {
                 RevHubOrientationOnRobot.UsbFacingDirection.UP));
         imu.initialize(params);
 
-        panels.addData("Status", "Init complete (SDK motors)");
+        panels.addData("Status", "Init complete (SDK motors) + Lift servo");
         panels.update();
     }
 
@@ -108,18 +133,30 @@ public class BotelloDATA extends OpMode {
         FrontL.setPower(fl);  FrontR.setPower(fr);
         BackL.setPower(bl);   BackR.setPower(br);
 
-        // Toggles
-        if (gamepad1.a && !aWasPressed) isIntakeOn = !isIntakeOn;
-        if (gamepad1.b && !bWasPressed) isWheelOn  = !isWheelOn;
-        aWasPressed = gamepad1.a;
-        bWasPressed = gamepad1.b;
+        // ===== Mechanisms =====
+        // (1) Intake control: A = normal intake, X = reverse, else off
+        double intakeCmd = gamepad1.a ? 1.0 : (gamepad1.x ? -1.0 : 0.0);
+        Intake.setPower(intakeCmd);
 
-        Intake.setPower(isIntakeOn ? 1.0 : 0.0);
+        // (2) Wheel toggle on B (unchanged):
+        if (gamepad1.b && !bWasPressed) isWheelOn = !isWheelOn;
+        bWasPressed = gamepad1.b;
         Wheel.setPower(isWheelOn ? 1.0 : 0.0);
+
+        // ===== Auto-Lift Servo based on Wheel velocity =====
+        // Use MotorEx.getVelocity() -> ticks/second
+        double wheelTps  = safeVel(Wheel);
+        // Hysteresis: only change state when crossing thresholds
+        if (!liftIsRaised && wheelTps >= LIFT_ON_TPS) {
+            Lift.setPosition(LIFT_RAISED_POS);
+            liftIsRaised = true;
+        } else if (liftIsRaised && wheelTps <= LIFT_OFF_TPS) {
+            Lift.setPosition(LIFT_LOWERED_POS);
+            liftIsRaised = false;
+        }
 
         // Telemetry/graphs (TPS + RPM + volts)
         double intakeTps = safeVel(Intake);                 // ticks/sec
-        double wheelTps  = safeVel(Wheel);
         double intakeRpm = toRPM(intakeTps, INTAKE_TPR);    // RPM
         double wheelRpm  = toRPM(wheelTps,  WHEEL_TPR);
         double batteryV  = getBatteryVoltage();
@@ -129,6 +166,10 @@ public class BotelloDATA extends OpMode {
         panels.addData("Intake_RPM", intakeRpm);
         panels.addData("Wheel_RPM",  wheelRpm);
         panels.addData("Battery_V",  batteryV);
+        panels.addData("Lift_Pos",   Lift.getPosition());
+        panels.addData("LiftRaised", liftIsRaised);
+        panels.addData("Lift_ON_TPS",  LIFT_ON_TPS);
+        panels.addData("Lift_OFF_TPS", LIFT_OFF_TPS);
         panels.addData("Heading_deg", Math.toDegrees(heading));
         panels.addData("FL_power", fl);
         panels.addData("FR_power", fr);
