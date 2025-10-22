@@ -46,14 +46,14 @@ public class BotelloDATA extends OpMode {
     // ===== Servo config =====
     // Positions: tune to your linkage. 0.0..1.0 range.
     private static final double LIFT_LOWERED_POS = 0.10; // resting (default)
-    private static final double LIFT_RAISED_POS  = 0.85; // raised only when wheel is fast enough
+    private static final double LIFT_RAISED_POS  = 0.80; // raised only when wheel is fast enough
 
     // Velocity thresholds using MotorEx.getVelocity() [ticks/second].
     // Use a little hysteresis to avoid chatter near the threshold.
     // Example: lift when wheel >= ~500 RPM and lower again when <= ~450 RPM
     // RPM to TPS: TPS = (RPM/60) * TPR
-    private static final double LIFT_ON_RPM  = 500.0;  // raise at/above this wheel speed
-    private static final double LIFT_OFF_RPM = 450.0;  // lower at/below this wheel speed
+    private static final double LIFT_ON_RPM  = 3000.0;  // raise at/above this wheel speed
+    private static final double LIFT_OFF_RPM = 2500.0;  // lower at/below this wheel speed
     private static final double LIFT_ON_TPS  = (LIFT_ON_RPM / 60.0) * WHEEL_TPR;
     private static final double LIFT_OFF_TPS = (LIFT_OFF_RPM / 60.0) * WHEEL_TPR;
 
