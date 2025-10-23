@@ -35,6 +35,9 @@ public class BotelloDATA extends OpMode {
     private boolean isWheelOn  = false;   // B toggles this
     private boolean bWasPressed = false;
 
+    // Button edges for tuning
+    private boolean rbPrev=false, lbPrev=false, duPrev=false, ddPrev=false, dlPrev=false, drPrev=false, startPrev=false;
+
     // REV-41-1600 (28 CPR) * gear ratio => ticks per output revolution
     private static final double MOTOR_ENCODER_CPR = 28.0;
     private static final double INTAKE_GEAR_RATIO = 20.0; // TODO: set yours
@@ -44,20 +47,24 @@ public class BotelloDATA extends OpMode {
     private static final double WHEEL_TPR  = MOTOR_ENCODER_CPR * WHEEL_GEAR_RATIO;  // 28 for 1:1
 
     // ===== Servo config =====
-    // Positions: tune to your linkage. 0.0..1.0 range.
     private static final double LIFT_LOWERED_POS = 0.10; // resting (default)
-    private static final double LIFT_RAISED_POS  = 0.80; // raised only when wheel is fast enough
+    private static final double LIFT_RAISED_POS  = 0.85; // raised only when wheel is fast enough
 
-    // Velocity thresholds using MotorEx.getVelocity() [ticks/second].
-    // Use a little hysteresis to avoid chatter near the threshold.
-    // Example: lift when wheel >= ~500 RPM and lower again when <= ~450 RPM
-    // RPM to TPS: TPS = (RPM/60) * TPR
-    private static final double LIFT_ON_RPM  = 3000.0;  // raise at/above this wheel speed
-    private static final double LIFT_OFF_RPM = 2500.0;  // lower at/below this wheel speed
+    // Velocity thresholds for lift hysteresis (RPM -> TPS)
+    private static final double LIFT_ON_RPM  = 500.0;  // raise at/above this wheel speed
+    private static final double LIFT_OFF_RPM = 450.0;  // lower at/below this wheel speed
     private static final double LIFT_ON_TPS  = (LIFT_ON_RPM / 60.0) * WHEEL_TPR;
     private static final double LIFT_OFF_TPS = (LIFT_OFF_RPM / 60.0) * WHEEL_TPR;
 
     private boolean liftIsRaised = false; // track last servo state for hysteresis
+
+    // ===== Tunable RPM hold =====
+    private double targetWheelRPM = 3550.0;     // starting setpoint (under-load target)
+    private static final double STEP_SMALL = 25;   // RB/LB
+    private static final double STEP_MED   = 100;  // DPAD L/R
+    private static final double STEP_BIG   = 250;  // DPAD U/D
+    private static final double RPM_MIN    = 0.0;
+    private static final double RPM_MAX    = 6000.0; // sanity clamp
 
     @Override
     public void init() {
@@ -71,48 +78,57 @@ public class BotelloDATA extends OpMode {
         Intake = hardwareMap.get(DcMotorEx.class, "Intake");
         Wheel  = hardwareMap.get(DcMotorEx.class, "Wheel");
 
-        // Map servo (set your actual config name)
+        // Map servo
         Lift   = hardwareMap.get(Servo.class, "Lift");
 
-        // Directions same as before
+        // Directions
         FrontL.setDirection(DcMotor.Direction.REVERSE);
         BackL.setDirection(DcMotor.Direction.REVERSE);
         FrontR.setDirection(DcMotor.Direction.REVERSE);
         BackR.setDirection(DcMotor.Direction.REVERSE);
 
-        // If your mechanisms need to spin the other way, flip here:
         Intake.setDirection(DcMotor.Direction.REVERSE);
         Wheel.setDirection(DcMotor.Direction.REVERSE);
 
-        // Brake behavior
+        // Brakes
         DcMotor.ZeroPowerBehavior brake = DcMotor.ZeroPowerBehavior.BRAKE;
         FrontL.setZeroPowerBehavior(brake);
         FrontR.setZeroPowerBehavior(brake);
         BackL.setZeroPowerBehavior(brake);
         BackR.setZeroPowerBehavior(brake);
         Intake.setZeroPowerBehavior(brake);
-        // Wheel left FLOAT if you prefer; otherwise:
-        // Wheel.setZeroPowerBehavior(brake);
+        // Wheel: RUN_USING_ENCODER + setVelocity handles holding; BRAKE is fine here too
+        Wheel.setZeroPowerBehavior(brake);
 
-        // Servo default: stay lowered on init
+        // Use encoders for velocity control
+        Wheel.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+        Wheel.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+
+        // (Optional) You can tune PIDF here if needed (SDK default is usually OK)
+        // Wheel.setVelocityPIDFCoefficients(kP, kI, kD, kF);
+
+        // Servo default
         Lift.setPosition(LIFT_LOWERED_POS);
         liftIsRaised = false;
 
-        // IMU setup (use your RIGHT/UP mount)
+        // IMU setup
         imu = hardwareMap.get(IMU.class, "imu");
         IMU.Parameters params = new IMU.Parameters(new RevHubOrientationOnRobot(
                 RevHubOrientationOnRobot.LogoFacingDirection.RIGHT,
                 RevHubOrientationOnRobot.UsbFacingDirection.UP));
         imu.initialize(params);
 
-        panels.addData("Status", "Init complete (SDK motors) + Lift servo");
+        panels.addData("Status", "Init complete: RPM Hold enabled");
         panels.update();
     }
 
     @Override
     public void loop() {
-        // Reset yaw with D-Pad Up
-        if (gamepad1.dpad_up) imu.resetYaw();
+        // Reset yaw with D-Pad Up (hold)
+        if (gamepad1.left_bumper) {
+            imu.resetYaw(); // hidden combo (LS+DU) to avoid conflicts with tuning
+        }
+        duPrev = gamepad1.dpad_up;
 
         // Field-centric drive
         double y  = -gamepad1.left_stick_y;
@@ -138,15 +154,48 @@ public class BotelloDATA extends OpMode {
         double intakeCmd = gamepad1.a ? 1.0 : (gamepad1.x ? -1.0 : 0.0);
         Intake.setPower(intakeCmd);
 
-        // (2) Wheel toggle on B (unchanged):
+        // (2) Wheel toggle on B:
         if (gamepad1.b && !bWasPressed) isWheelOn = !isWheelOn;
         bWasPressed = gamepad1.b;
-        Wheel.setPower(isWheelOn ? 1.0 : 0.0);
+
+        // ===== Tunable RPM setpoint (edge-detected) =====
+        // RB/LB: ±25
+        if (gamepad1.right_bumper && !rbPrev) adjustTargetRPM(+STEP_SMALL);
+        if (gamepad1.left_bumper  && !lbPrev) adjustTargetRPM(-STEP_SMALL);
+        rbPrev = gamepad1.right_bumper;
+        lbPrev = gamepad1.left_bumper;
+
+        // DPad Right/Left: ±100
+        if (gamepad1.dpad_right && !drPrev) adjustTargetRPM(+STEP_MED);
+        if (gamepad1.dpad_left  && !dlPrev) adjustTargetRPM(-STEP_MED);
+        drPrev = gamepad1.dpad_right;
+        dlPrev = gamepad1.dpad_left;
+
+        // DPad Up/Down: ±250
+        if (gamepad1.dpad_up && !duPrev)   adjustTargetRPM(+STEP_BIG);
+        if (gamepad1.dpad_down && !ddPrev) adjustTargetRPM(-STEP_BIG);
+        ddPrev = gamepad1.dpad_down;
+
+        // START: snap to preset (useful between cycles)
+        if (gamepad1.start && !startPrev) targetWheelRPM = 3550.0;
+        startPrev = gamepad1.start;
+
+        // ===== Apply hold or stop =====
+        final double wheelTps  = safeVel(Wheel);
+        final double wheelRpm  = toRPM(wheelTps, WHEEL_TPR);
+
+        if (isWheelOn) {
+            // Ensure RUN_USING_ENCODER for velocity control
+            if (Wheel.getMode() != DcMotor.RunMode.RUN_USING_ENCODER) {
+                Wheel.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+            }
+            double targetTps = (targetWheelRPM / 60.0) * WHEEL_TPR;
+            Wheel.setVelocity(targetTps);  // built-in PIDF holds TPS
+        } else {
+            Wheel.setPower(0.0);
+        }
 
         // ===== Auto-Lift Servo based on Wheel velocity =====
-        // Use MotorEx.getVelocity() -> ticks/second
-        double wheelTps  = safeVel(Wheel);
-        // Hysteresis: only change state when crossing thresholds
         if (!liftIsRaised && wheelTps >= LIFT_ON_TPS) {
             Lift.setPosition(LIFT_RAISED_POS);
             liftIsRaised = true;
@@ -155,28 +204,33 @@ public class BotelloDATA extends OpMode {
             liftIsRaised = false;
         }
 
-        // Telemetry/graphs (TPS + RPM + volts)
-        double intakeTps = safeVel(Intake);                 // ticks/sec
-        double intakeRpm = toRPM(intakeTps, INTAKE_TPR);    // RPM
-        double wheelRpm  = toRPM(wheelTps,  WHEEL_TPR);
+        // Telemetry/graphs
+        double intakeTps = safeVel(Intake);
+        double intakeRpm = toRPM(intakeTps, INTAKE_TPR);
         double batteryV  = getBatteryVoltage();
 
-        panels.addData("Intake_TPS", intakeTps);
-        panels.addData("Wheel_TPS",  wheelTps);
-        panels.addData("Intake_RPM", intakeRpm);
-        panels.addData("Wheel_RPM",  wheelRpm);
-        panels.addData("Battery_V",  batteryV);
-        panels.addData("Lift_Pos",   Lift.getPosition());
-        panels.addData("LiftRaised", liftIsRaised);
-        panels.addData("Lift_ON_TPS",  LIFT_ON_TPS);
-        panels.addData("Lift_OFF_TPS", LIFT_OFF_TPS);
-        panels.addData("Heading_deg", Math.toDegrees(heading));
+        panels.addData("Wheel_ON",  isWheelOn);
+        panels.addData("Wheel_RPM_target", targetWheelRPM);
+        panels.addData("Wheel_RPM_meas",   wheelRpm);
+        panels.addData("Wheel_TPS_meas",   wheelTps);
+        panels.addData("Intake_RPM",       intakeRpm);
+        panels.addData("Battery_V",        batteryV);
+        panels.addData("Lift_Pos",         Lift.getPosition());
+        panels.addData("LiftRaised",       liftIsRaised);
+        panels.addData("Heading_deg",      Math.toDegrees(heading));
         panels.addData("FL_power", fl);
         panels.addData("FR_power", fr);
         panels.addData("BL_power", bl);
         panels.addData("BR_power", br);
-
         panels.update();
+    }
+
+    private void adjustTargetRPM(double delta) {
+        targetWheelRPM = clamp(targetWheelRPM + delta, RPM_MIN, RPM_MAX);
+    }
+
+    private static double clamp(double v, double lo, double hi) {
+        return Math.max(lo, Math.min(hi, v));
     }
 
     private static double safeVel(DcMotorEx m) {
@@ -196,3 +250,4 @@ public class BotelloDATA extends OpMode {
         return (min == Double.POSITIVE_INFINITY) ? 0.0 : min;
     }
 }
+// Certified Dylen Vasquez Design
