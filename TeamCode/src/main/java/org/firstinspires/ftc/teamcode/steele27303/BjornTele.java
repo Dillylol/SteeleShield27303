@@ -9,12 +9,15 @@ import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.IMU;
 import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.hardware.VoltageSensor;
-
 import org.firstinspires.ftc.robotcore.external.Telemetry;
 import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
+import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
+import com.qualcomm.robotcore.hardware.DistanceSensor;
 
-@TeleOp(name = "BotelloDATA")
-public class BotelloDATA extends OpMode {
+import java.util.Arrays;
+
+@TeleOp(name = "BjornTele")
+public class BjornTele extends OpMode {
 
     // Drive motors (stay DcMotor – no velocity reads)
     private DcMotor BackL, BackR, FrontL, FrontR;
@@ -31,12 +34,15 @@ public class BotelloDATA extends OpMode {
     // IMU for field-centric
     private IMU imu;
 
+    // ToF distance sensor at the very front (matches how you measured distances)
+    private DistanceSensor tofFront;
+
     // Toggles
     private boolean isWheelOn  = false;   // B toggles this
     private boolean bWasPressed = false;
 
-    // Button edges for tuning
-    private boolean rbPrev=false, lbPrev=false, duPrev=false, ddPrev=false, dlPrev=false, drPrev=false, startPrev=false;
+    // Button edges for tuning / scan
+    private boolean rbPrev=false, lbPrev=false, dpadUpPrev=false;
 
     // REV-41-1600 (28 CPR) * gear ratio => ticks per output revolution
     private static final double MOTOR_ENCODER_CPR = 28.0;
@@ -48,26 +54,40 @@ public class BotelloDATA extends OpMode {
 
     // ===== Servo config =====
     private static final double LIFT_LOWERED_POS = 0.10; // resting (default)
-    private static final double LIFT_RAISED_POS  = 0.85; // raised only when wheel is fast enough
+    private static final double LIFT_RAISED_POS  = 0.85; // raised when wheel fast enough
 
     // Velocity thresholds for lift hysteresis (RPM -> TPS)
-    private static final double LIFT_ON_RPM  = 2000.0;  // raise at/above this wheel speed
-    private static final double LIFT_OFF_RPM = 1500.0;  // lower at/below this wheel speed
+    private static final double LIFT_ON_RPM  = 500.0;  // raise at/above this wheel speed
+    private static final double LIFT_OFF_RPM = 450.0;  // lower at/below this wheel speed
     private static final double LIFT_ON_TPS  = (LIFT_ON_RPM / 60.0) * WHEEL_TPR;
     private static final double LIFT_OFF_TPS = (LIFT_OFF_RPM / 60.0) * WHEEL_TPR;
 
-    private boolean liftIsRaised = false; // track last servo state for hysteresis
+    private boolean liftIsRaised = false;
 
     // ===== Tunable RPM hold =====
-    private double targetWheelRPM = 3550.0;     // starting setpoint (under-load target)
-    private static final double STEP_SMALL = 25;   // RB/LB
-    private static final double STEP_MED   = 100;  // DPAD L/R
-    private static final double STEP_BIG   = 250;  // DPAD U/D
+    private double targetWheelRPM = 2825.0;     // default near your mid preset
+    private static final double STEP_SMALL = 25;   // RB/LB only (big steps removed)
     private static final double RPM_MIN    = 0.0;
     private static final double RPM_MAX    = 6000.0; // sanity clamp
 
+    // Linear fit from your field tests (distance in FEET taken from front of robot)
+    // RPM ≈ m*Dft + b
+    private static final double M_RPM_PER_FT = 83.3;
+    private static final double B_RPM_OFFSET = 2394.0;
+
+    // ToF scan state
+    private static final int SCAN_SAMPLES = 10;
+    private int scanLeft = 0;
+    private final double[] scanBuf = new double[SCAN_SAMPLES];
+    private double lastScanFt = Double.NaN; // for telemetry
+    // If the cannon were offset behind the sensor, you'd add it here; for you it's 0:
+    private static final double SENSOR_TO_CANNON_OFFSET_FT = 0.0;
+
     @Override
     public void init() {
+        // Make DS telemetry snappier
+        telemetry.setMsTransmissionInterval(50);
+
         // Map drive
         BackL  = hardwareMap.get(DcMotor.class, "lr");
         BackR  = hardwareMap.get(DcMotor.class, "rr");
@@ -80,6 +100,9 @@ public class BotelloDATA extends OpMode {
 
         // Map servo
         Lift   = hardwareMap.get(Servo.class, "Lift");
+
+        // Map ToF by config name (set this to your actual config device name)
+        tofFront = hardwareMap.get(DistanceSensor.class, "ToF_Front");
 
         // Directions
         FrontL.setDirection(DcMotor.Direction.REVERSE);
@@ -97,19 +120,16 @@ public class BotelloDATA extends OpMode {
         BackL.setZeroPowerBehavior(brake);
         BackR.setZeroPowerBehavior(brake);
         Intake.setZeroPowerBehavior(brake);
-        // Wheel: RUN_USING_ENCODER + setVelocity handles holding; BRAKE is fine here too
         Wheel.setZeroPowerBehavior(brake);
 
-        // Use encoders for velocity control
+        // Encoders for velocity control
         Wheel.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
         Wheel.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
 
-        // (Optional) You can tune PIDF here if needed (SDK default is usually OK)
-        // Wheel.setVelocityPIDFCoefficients(kP, kI, kD, kF);
-
-        // Servo default
-        Lift.setPosition(LIFT_LOWERED_POS);
-        liftIsRaised = false;
+        // *** RULE COMPLIANT: No servo movement in init ***
+        // Do NOT call Lift.setPosition() here.
+        // We'll command it in start()/loop() only.
+        liftIsRaised = false; // internal flag only
 
         // IMU setup
         imu = hardwareMap.get(IMU.class, "imu");
@@ -118,18 +138,21 @@ public class BotelloDATA extends OpMode {
                 RevHubOrientationOnRobot.UsbFacingDirection.UP));
         imu.initialize(params);
 
-        panels.addData("Status", "Init complete: RPM Hold enabled");
+        panels.addData("Status", "Init complete: ToF Scan RPM Assist (no servo move)");
         panels.update();
     }
 
     @Override
-    public void loop() {
-        // Reset yaw with D-Pad Up (hold)
-        if (gamepad1.left_bumper) {
-            imu.resetYaw(); // hidden combo (LS+DU) to avoid conflicts with tuning
+    public void start() {
+        // Safe default at TeleOp start (now movement is allowed): keep Lift lowered
+        if (Lift != null) {
+            try { Lift.setPosition(LIFT_LOWERED_POS); } catch (Exception ignored) {}
         }
-        duPrev = gamepad1.dpad_up;
+        liftIsRaised = false;
+    }
 
+    @Override
+    public void loop() {
         // Field-centric drive
         double y  = -gamepad1.left_stick_y;
         double x  =  gamepad1.left_stick_x * 1.1; // compensate strafing
@@ -150,52 +173,59 @@ public class BotelloDATA extends OpMode {
         BackL.setPower(bl);   BackR.setPower(br);
 
         // ===== Mechanisms =====
-        // (1) Intake control: A = normal intake, X = reverse, else off
+        // Intake: A = normal intake, X = reverse, else off
         double intakeCmd = gamepad1.a ? 1.0 : (gamepad1.x ? -1.0 : 0.0);
         Intake.setPower(intakeCmd);
 
-        // (2) Wheel toggle on B:
+        // Wheel toggle on B:
         if (gamepad1.b && !bWasPressed) isWheelOn = !isWheelOn;
         bWasPressed = gamepad1.b;
 
-        // ===== Tunable RPM setpoint (edge-detected) =====
-        // RB/LB: ±25
+        // Small trims only (±25) on RB/LB
         if (gamepad1.right_bumper && !rbPrev) adjustTargetRPM(+STEP_SMALL);
         if (gamepad1.left_bumper  && !lbPrev) adjustTargetRPM(-STEP_SMALL);
         rbPrev = gamepad1.right_bumper;
         lbPrev = gamepad1.left_bumper;
 
-        // DPad Right/Left: ±100
-        if (gamepad1.dpad_right && !drPrev) adjustTargetRPM(+STEP_MED);
-        if (gamepad1.dpad_left  && !dlPrev) adjustTargetRPM(-STEP_MED);
-        drPrev = gamepad1.dpad_right;
-        dlPrev = gamepad1.dpad_left;
+        // ===== ToF SCAN on D-Pad Up (edge trigger) =====
+        if (gamepad1.dpad_up && !dpadUpPrev) { beginScan(); }
+        dpadUpPrev = gamepad1.dpad_up;
 
-        // DPad Up/Down: ±250
-        if (gamepad1.dpad_up && !duPrev)   adjustTargetRPM(+STEP_BIG);
-        if (gamepad1.dpad_down && !ddPrev) adjustTargetRPM(-STEP_BIG);
-        ddPrev = gamepad1.dpad_down;
-
-        // START: snap to preset (useful between cycles)
-        if (gamepad1.start && !startPrev) targetWheelRPM = 3550.0;
-        startPrev = gamepad1.start;
+        // If scanning, collect one sample per loop
+        if (scanLeft > 0) {
+            double inches = safeTofInches(tofFront);
+            scanBuf[SCAN_SAMPLES - scanLeft] = inches;
+            scanLeft--;
+            if (scanLeft == 0) {
+                double inchesMed = median(scanBuf);
+                // Basic validity & clamp
+                if (inchesMed > 6 && inchesMed < 120) {
+                    double ft = inchesMed / 12.0 + SENSOR_TO_CANNON_OFFSET_FT;
+                    lastScanFt = ft;
+                    targetWheelRPM = clamp(rpmFromFeet(ft), RPM_MIN, RPM_MAX);
+                } // else ignore bad scan (leave target as-is)
+            }
+        }
 
         // ===== Apply hold or stop =====
         final double wheelTps  = safeVel(Wheel);
         final double wheelRpm  = toRPM(wheelTps, WHEEL_TPR);
 
         if (isWheelOn) {
-            // Ensure RUN_USING_ENCODER for velocity control
             if (Wheel.getMode() != DcMotor.RunMode.RUN_USING_ENCODER) {
                 Wheel.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
             }
-            double targetTps = (targetWheelRPM / 60.0) * WHEEL_TPR;
-            Wheel.setVelocity(targetTps);  // built-in PIDF holds TPS
+            // Optional light battery compensation
+            double v = getBatteryVoltage();
+            double scale = 12.5 / Math.max(10.0, v);
+            double targetTps = (targetWheelRPM / 60.0) * WHEEL_TPR * scale;
+            Wheel.setVelocity(targetTps);
         } else {
             Wheel.setPower(0.0);
         }
 
         // ===== Auto-Lift Servo based on Wheel velocity =====
+        // (Moved out of init to comply with no-motion-in-init)
         if (!liftIsRaised && wheelTps >= LIFT_ON_TPS) {
             Lift.setPosition(LIFT_RAISED_POS);
             liftIsRaised = true;
@@ -204,25 +234,39 @@ public class BotelloDATA extends OpMode {
             liftIsRaised = false;
         }
 
-        // Telemetry/graphs
-        double intakeTps = safeVel(Intake);
-        double intakeRpm = toRPM(intakeTps, INTAKE_TPR);
-        double batteryV  = getBatteryVoltage();
+        // ======== DRIVER STATION (minimal) ========
+        // Prefer last scanned distance; fall back to live ToF
+        double tofNowIn = safeTofInches(tofFront);
+        double tofNowFt = (tofNowIn > 0) ? tofNowIn/12.0 : Double.NaN;
+        double distFtDisplay = (!Double.isNaN(lastScanFt)) ? lastScanFt
+                : (!Double.isNaN(tofNowFt) ? tofNowFt : Double.NaN);
 
+        telemetry.addData("Wheel RPM tgt", "%.0f", targetWheelRPM);
+        telemetry.addData("Wheel RPM act", "%.0f", wheelRpm);
+        telemetry.addData("Distance (ft)", (Double.isNaN(distFtDisplay) ? "—" : String.format("%.2f", distFtDisplay)));
+        telemetry.update();
+
+        // ===== Panels (for graphs / deeper debug) =====
         panels.addData("Wheel_ON",  isWheelOn);
-        panels.addData("Wheel_RPM_target", targetWheelRPM);
-        panels.addData("Wheel_RPM_meas",   wheelRpm);
-        panels.addData("Wheel_TPS_meas",   wheelTps);
-        panels.addData("Intake_RPM",       intakeRpm);
-        panels.addData("Battery_V",        batteryV);
-        panels.addData("Lift_Pos",         Lift.getPosition());
-        panels.addData("LiftRaised",       liftIsRaised);
-        panels.addData("Heading_deg",      Math.toDegrees(heading));
-        panels.addData("FL_power", fl);
-        panels.addData("FR_power", fr);
-        panels.addData("BL_power", bl);
-        panels.addData("BR_power", br);
+        panels.addData("RPM_target", targetWheelRPM);
+        panels.addData("RPM_meas",   wheelRpm);
+        panels.addData("ToF_in_now", tofNowIn);
+        panels.addData("ToF_ft_lastScan", lastScanFt);
+        panels.addData("Battery_V",  getBatteryVoltage());
+        panels.addData("Lift_Pos",   Lift.getPosition());
+        panels.addData("LiftRaised", liftIsRaised);
         panels.update();
+    }
+
+    // ------------ Helpers ------------
+
+    private void beginScan() {
+        Arrays.fill(scanBuf, 0.0);
+        scanLeft = SCAN_SAMPLES;
+    }
+
+    private static double rpmFromFeet(double ft) {
+        return M_RPM_PER_FT * ft + B_RPM_OFFSET;
     }
 
     private void adjustTargetRPM(double delta) {
@@ -231,6 +275,13 @@ public class BotelloDATA extends OpMode {
 
     private static double clamp(double v, double lo, double hi) {
         return Math.max(lo, Math.min(hi, v));
+    }
+
+    private static double median(double[] a) {
+        double[] b = Arrays.copyOf(a, a.length);
+        Arrays.sort(b);
+        int n = b.length;
+        return (n % 2 == 1) ? b[n/2] : 0.5*(b[n/2 - 1] + b[n/2]);
     }
 
     private static double safeVel(DcMotorEx m) {
@@ -248,6 +299,15 @@ public class BotelloDATA extends OpMode {
             if (v > 0) min = Math.min(min, v);
         }
         return (min == Double.POSITIVE_INFINITY) ? 0.0 : min;
+    }
+
+    private static double safeTofInches(DistanceSensor ds) {
+        try {
+            double d = ds.getDistance(DistanceUnit.INCH);
+            return (Double.isNaN(d) || d <= 0) ? -1.0 : d;
+        } catch (Exception e) {
+            return -1.0;
+        }
     }
 }
 // Certified Dylen Vasquez Design
