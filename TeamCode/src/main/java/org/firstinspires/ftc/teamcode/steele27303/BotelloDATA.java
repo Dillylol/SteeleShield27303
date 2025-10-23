@@ -51,8 +51,8 @@ public class BotelloDATA extends OpMode {
     private static final double LIFT_RAISED_POS  = 0.85; // raised only when wheel is fast enough
 
     // Velocity thresholds for lift hysteresis (RPM -> TPS)
-    private static final double LIFT_ON_RPM  = 3500.0;  // raise at/above this wheel speed
-    private static final double LIFT_OFF_RPM = 3250.0;  // lower at/below this wheel speed
+    private static final double LIFT_ON_RPM  = 500.0;  // raise at/above this wheel speed
+    private static final double LIFT_OFF_RPM = 450.0;  // lower at/below this wheel speed
     private static final double LIFT_ON_TPS  = (LIFT_ON_RPM / 60.0) * WHEEL_TPR;
     private static final double LIFT_OFF_TPS = (LIFT_OFF_RPM / 60.0) * WHEEL_TPR;
 
@@ -125,7 +125,7 @@ public class BotelloDATA extends OpMode {
     @Override
     public void loop() {
         // Reset yaw with D-Pad Up (hold)
-        if (gamepad1.dpad_up && !duPrev && gamepad1.left_stick_button) {
+        if (gamepad1.left_bumper) {
             imu.resetYaw(); // hidden combo (LS+DU) to avoid conflicts with tuning
         }
         duPrev = gamepad1.dpad_up;
