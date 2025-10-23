@@ -42,7 +42,7 @@ public class BjornTele extends OpMode {
     private boolean bWasPressed = false;
 
     // Button edges for tuning / scan
-    private boolean rbPrev=false, lbPrev=false, dpadUpPrev=false;
+    private boolean rbPrev=false, lbPrev=false, dpadUpPrev=false, dpadDownPrev=false;
 
     // REV-41-1600 (28 CPR) * gear ratio => ticks per output revolution
     private static final double MOTOR_ENCODER_CPR = 28.0;
@@ -56,24 +56,24 @@ public class BjornTele extends OpMode {
     private static final double LIFT_LOWERED_POS = 0.10; // resting (default)
     private static final double LIFT_RAISED_POS  = 0.85; // raised when wheel fast enough
 
-    // Velocity thresholds for lift hysteresis (RPM -> TPS)
-    private static final double LIFT_ON_RPM  = 500.0;  // raise at/above this wheel speed
-    private static final double LIFT_OFF_RPM = 450.0;  // lower at/below this wheel speed
-    private static final double LIFT_ON_TPS  = (LIFT_ON_RPM / 60.0) * WHEEL_TPR;
-    private static final double LIFT_OFF_TPS = (LIFT_OFF_RPM / 60.0) * WHEEL_TPR;
+    // ===== Dynamic lift readiness (opens when wheel RPM ≈ target for a short hold time)
+    private static final double READY_TOL_RPM = 250.0;      // ± band around target
+    private static final double READY_MIN_TARGET_RPM = 2000.0; // don't open for tiny targets
+    private static final long   READY_HOLD_MS = 500;        // must be in-band this long
 
-    private boolean liftIsRaised = false;
+    private boolean liftIsRaised = false;    // current servo state
+    private long    readyBandEnterMs = -1;   // time we first entered the band
 
     // ===== Tunable RPM hold =====
     private double targetWheelRPM = 2825.0;     // default near your mid preset
     private static final double STEP_SMALL = 25;   // RB/LB only (big steps removed)
     private static final double RPM_MIN    = 0.0;
-    private static final double RPM_MAX    = 6000.0; // sanity clamp
+    private static final double RPM_MAX    = 3800.0; // sanity clamp
 
     // Linear fit from your field tests (distance in FEET taken from front of robot)
     // RPM ≈ m*Dft + b
     private static final double M_RPM_PER_FT = 83.3;
-    private static final double B_RPM_OFFSET = 2394.0;
+    private static final double B_RPM_OFFSET = 2364.0;
 
     // ToF scan state
     private static final int SCAN_SAMPLES = 10;
@@ -102,7 +102,7 @@ public class BjornTele extends OpMode {
         Lift   = hardwareMap.get(Servo.class, "Lift");
 
         // Map ToF by config name (set this to your actual config device name)
-        tofFront = hardwareMap.get(DistanceSensor.class, "ToF_Front");
+        tofFront = hardwareMap.get(DistanceSensor.class, "TOF");
 
         // Directions
         FrontL.setDirection(DcMotor.Direction.REVERSE);
@@ -174,7 +174,7 @@ public class BjornTele extends OpMode {
 
         // ===== Mechanisms =====
         // Intake: A = normal intake, X = reverse, else off
-        double intakeCmd = gamepad1.a ? 1.0 : (gamepad1.x ? -1.0 : 0.0);
+        double intakeCmd = gamepad1.a ? 0.5 : (gamepad1.x ? -0.5 : 0.0);
         Intake.setPower(intakeCmd);
 
         // Wheel toggle on B:
@@ -191,6 +191,10 @@ public class BjornTele extends OpMode {
         if (gamepad1.dpad_up && !dpadUpPrev) { beginScan(); }
         dpadUpPrev = gamepad1.dpad_up;
 
+        // ===== IMU reset on D-Pad Down (edge) =====
+        if (gamepad1.dpad_down && !dpadDownPrev) { imu.resetYaw(); }
+        dpadDownPrev = gamepad1.dpad_down;
+
         // If scanning, collect one sample per loop
         if (scanLeft > 0) {
             double inches = safeTofInches(tofFront);
@@ -199,7 +203,7 @@ public class BjornTele extends OpMode {
             if (scanLeft == 0) {
                 double inchesMed = median(scanBuf);
                 // Basic validity & clamp
-                if (inchesMed > 6 && inchesMed < 120) {
+                if (inchesMed > 6 && inchesMed <= 120) { // accept up to ~8 ft
                     double ft = inchesMed / 12.0 + SENSOR_TO_CANNON_OFFSET_FT;
                     lastScanFt = ft;
                     targetWheelRPM = clamp(rpmFromFeet(ft), RPM_MIN, RPM_MAX);
@@ -224,14 +228,25 @@ public class BjornTele extends OpMode {
             Wheel.setPower(0.0);
         }
 
-        // ===== Auto-Lift Servo based on Wheel velocity =====
-        // (Moved out of init to comply with no-motion-in-init)
-        if (!liftIsRaised && wheelTps >= LIFT_ON_TPS) {
-            Lift.setPosition(LIFT_RAISED_POS);
-            liftIsRaised = true;
-        } else if (liftIsRaised && wheelTps <= LIFT_OFF_TPS) {
-            Lift.setPosition(LIFT_LOWERED_POS);
-            liftIsRaised = false;
+        // ===== Dynamic Auto-Lift based on readiness (target RPM ± tol for hold time) =====
+        long nowMs = (long)(getRuntime() * 1000.0);
+        boolean inBand = isWheelOn && (targetWheelRPM >= READY_MIN_TARGET_RPM)
+                && (Math.abs(wheelRpm - targetWheelRPM) <= READY_TOL_RPM);
+
+        if (inBand) {
+            if (readyBandEnterMs < 0) readyBandEnterMs = nowMs;
+            long dwell = nowMs - readyBandEnterMs;
+            if (!liftIsRaised && dwell >= READY_HOLD_MS) {
+                // Open after stable dwell time
+                try { Lift.setPosition(LIFT_RAISED_POS); } catch (Exception ignored) {}
+                liftIsRaised = true;
+            }
+        } else {
+            readyBandEnterMs = -1; // left the band; reset timer
+            if (liftIsRaised) {
+                try { Lift.setPosition(LIFT_LOWERED_POS); } catch (Exception ignored) {}
+                liftIsRaised = false;
+            }
         }
 
         // ======== DRIVER STATION (minimal) ========
@@ -255,6 +270,7 @@ public class BjornTele extends OpMode {
         panels.addData("Battery_V",  getBatteryVoltage());
         panels.addData("Lift_Pos",   Lift.getPosition());
         panels.addData("LiftRaised", liftIsRaised);
+        panels.addData("ReadyBand", Math.abs(wheelRpm - targetWheelRPM));
         panels.update();
     }
 
