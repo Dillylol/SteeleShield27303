@@ -85,16 +85,17 @@ public class BjornAUTO2 extends OpMode {
     private static double TPR               = MOTOR_ENCODER_CPR * GEAR_RATIO;
 
     // ---------------- Poses ----------------
-    private static final Pose START       = pose(0, 0, 0);
-    private static final Pose SHOOT_ZONE  = pose( 6, 35, -95);
-    private static final Pose ALIGN1      = pose(18, 44, -55);
-    private static final Pose GRAB1       = pose(37, -5, -55);
+    private static final Pose START       = pose(0, 0, 265);
+    private static final Pose SHOOT_ZONE  = pose( 3.5, 31, -95);
+    private static final Pose ALIGN1      = pose(15, 44.5, -55);
+    private static final Pose GRAB1       = pose(32, 22.6, -55);
     private static final Pose ALIGN1_BACK = pose(18, 44, -55);
-    private static final Pose ALIGN2      = pose(50, 40, -55);
-    private static final Pose GRAB2       = pose(37, 60, -55);
-    private static final Pose PARK        = pose(30, 52, -145);
+    private static final Pose ALIGN2      = pose(33.8, 60, -55);
+    private static final Pose GRAB2       = pose(52, 37, -55);
+    private static final Pose PARK        = pose(24, 52, -145);
 
     // ---------------- Paths ----------------
+
     private PathChain toShoot, toAlign1, toGrab1, toAlign1Back, toShoot2, toAlign2, toGrab2, toShoot3, toPark;
 
     // ---------------- State Machine ----------------
