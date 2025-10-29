@@ -49,17 +49,17 @@ public class BjornAUTO2 extends OpMode {
     private static double DRIVE_SPEED_ALIGN  = 0.70; // approaching shoot zone
 
     // Wheel RPMs
-    private static double WHEEL_IDLE_RPM     = 1200;   // flywheel idle while navigating or staging
+    private static double WHEEL_IDLE_RPM     = 2000;   // flywheel idle while navigating or staging
     private static double WHEEL_MAX_RPM      = 3600;   // maximum allowed
-    private static double WHEEL_MIN_RPM      = 1700;   // minimum usable for launches
+    private static double WHEEL_MIN_RPM      = 2200;   // minimum usable for launches
 
     // Intake power
     private static double INTAKE_POWER       = 1.00;
 
     // Intake pulse pattern when shooting
-    private static long   INTAKE_PULSE_ON_MS  = 1000L; // 1s on
-    private static long   INTAKE_PULSE_OFF_MS = 3000L; // 3s off between pulses
-    private static long   SHOOT_WINDOW_MS     = 5000L; // total time for a shoot phase (may span more than one pulse)
+    private static long   INTAKE_PULSE_ON_MS  = 3000L; // 1s on
+    private static long   INTAKE_PULSE_OFF_MS = 1000L; // 3s off between pulses
+    private static long   SHOOT_WINDOW_MS     = 10000L; // total time for a shoot phase (may span more than one pulse)
 
     // Lift positions (if used)
     private static double LIFT_LOWERED = 0.10;
@@ -76,7 +76,7 @@ public class BjornAUTO2 extends OpMode {
     private static double READY_OFF_RPM = 2500; // drop ready if <= this
 
     // Scan parameters
-    private static int    SCAN_SAMPLES = 7;   // median filter size
+    private static int    SCAN_SAMPLES = 15;   // median filter size
     private static double SENSOR_OFFSET_FT = 0.0; // add small offset if sensor is not at muzzle
 
     // Encoder math if you convert to velocity control
@@ -85,13 +85,13 @@ public class BjornAUTO2 extends OpMode {
     private static double TPR               = MOTOR_ENCODER_CPR * GEAR_RATIO;
 
     // ---------------- Poses ----------------
-    private static final Pose START       = pose(0, 0, 265);
-    private static final Pose SHOOT_ZONE  = pose( 3.5, 31, -95);
-    private static final Pose ALIGN1      = pose(15, 44.5, -55);
-    private static final Pose GRAB1       = pose(32, 22.6, -55);
-    private static final Pose ALIGN1_BACK = pose(18, 44, -55);
-    private static final Pose ALIGN2      = pose(33.8, 60, -55);
-    private static final Pose GRAB2       = pose(52, 37, -55);
+    private static final Pose START       = pose(0, 0, 265); //129
+    private static final Pose SHOOT_ZONE  = pose( 4.5, 33, -95);
+    private static final Pose ALIGN1      = pose(18.6, 38, -58);
+    private static final Pose GRAB1       = pose(24.2, 23.7, -58);
+    private static final Pose ALIGN1_BACK = pose(18.6, 38, -58);
+    private static final Pose ALIGN2      = pose(35.3, 52.8, -58);
+    private static final Pose GRAB2       = pose(47, 32.3, -58);
     private static final Pose PARK        = pose(24, 52, -145);
 
     // ---------------- Paths ----------------
