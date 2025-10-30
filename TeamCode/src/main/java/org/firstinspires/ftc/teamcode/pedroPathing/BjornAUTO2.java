@@ -50,7 +50,7 @@ public class BjornAUTO2 extends OpMode {
 
     // Wheel RPMs
     private static double WHEEL_IDLE_RPM     = 2000;   // flywheel idle while navigating or staging
-    private static double WHEEL_MAX_RPM      = 3600;   // maximum allowed
+    private static double WHEEL_MAX_RPM      = 4000;   // maximum allowed
     private static double WHEEL_MIN_RPM      = 2200;   // minimum usable for launches
 
     // Intake power
@@ -68,8 +68,8 @@ public class BjornAUTO2 extends OpMode {
 
     // Distance→RPM mapping (feet)
     //   rpm = M_RPM_PER_FT * feet + B_RPM_OFFSET  (clamped to [WHEEL_MIN_RPM, WHEEL_MAX_RPM])
-    private static double M_RPM_PER_FT = 400.0;
-    private static double B_RPM_OFFSET = 1400.0;
+    private static double M_RPM_PER_FT = 83.3;
+    private static double B_RPM_OFFSET = 2364.0;
 
     // Hysteresis (for deciding if wheel is "ready")
     private static double READY_ON_RPM  = 2700; // consider ready when >= this
@@ -87,9 +87,9 @@ public class BjornAUTO2 extends OpMode {
     // ---------------- Poses ----------------
     private static final Pose START       = pose(0, 0, 265); //129
     private static final Pose SHOOT_ZONE  = pose( 4.5, 33, -95);
-    private static final Pose ALIGN1      = pose(18.6, 38, -58);
-    private static final Pose GRAB1       = pose(24.2, 23.7, -58);
-    private static final Pose ALIGN1_BACK = pose(18.6, 38, -58);
+    private static final Pose ALIGN1      = pose(23, 36, -58);
+    private static final Pose GRAB1       = pose(-30, 17.8, -58);
+    private static final Pose ALIGN1_BACK = pose(23, 36, -58);
     private static final Pose ALIGN2      = pose(35.3, 52.8, -58);
     private static final Pose GRAB2       = pose(47, 32.3, -58);
     private static final Pose PARK        = pose(24, 52, -145);
