@@ -18,25 +18,13 @@ import java.util.Arrays;
 /**
  * BjornAUTO2 — TeleOp-inspired autonomous with dynamic flywheel RPM and intake pulses.
  *
- * Adds:
- *  • **1.5s delay** between lift opening and intake turning on (prevents intercepts).
- *  • Telemetry shows **current RPM** and **target RPM**.
- *
- * New path plan (inches, headings in degrees):
- *   A)  ( 6, 35, -95)  → Activate shooter (pulse intake, dynamic RPM)
- *   A1) alignment set
- *   B)  (18, 44, -55)  → Intake starts
- *   C)  (37, -5, -55)  → Grab set; Wheel to idle
- *       (On next leg start: Intake OFF)
- *   D)  (18, 44, -55)  → Return/Reverse leg
- *   E)  ( 6, 35, -95)  → Activate shooter (pulse intake, dynamic RPM)
- *   F)  (50, 40, -55)  → Intake starts (second set)
- *   G)  (37, 60, -55)  → Grab set; Wheel on (idle)
- *   H)  ( 6, 35, -95)  → Activate shooter (pulse intake, dynamic RPM)
- *   I)  (30, 52, -145) → Leave / park
+ * Change requested: when the lift opens, wait a fixed delay BEFORE allowing the intake to run,
+ * and add a 1s "settle" delay AFTER reaching the shooting pose BEFORE starting the TOF scan.
+ * - Flywheel keeps spinning the whole time; only intake is gated by the lift-open delay.
+ * - TOF scanning is delayed ~1s after the robot reaches the shoot pose to improve aim stability.
  */
-@Autonomous(name = "BjornAUTO2")
-public class BjornAUTO2 extends OpMode {
+@Autonomous(name = "BOT")
+public class BotelloAUTO1 extends OpMode {
 
     // ---------------- Hardware ----------------
     private Follower follower;
@@ -52,20 +40,26 @@ public class BjornAUTO2 extends OpMode {
     // Wheel RPMs
     private static double WHEEL_IDLE_RPM     = 2000;   // flywheel idle while navigating or staging
     private static double WHEEL_MAX_RPM      = 4000;   // maximum allowed
-    private static double WHEEL_MIN_RPM      = 2200;   // minimum usable for launches
+    private static double WHEEL_MIN_RPM      = 2000;   // minimum usable for launches
 
     // Intake power
     private static double INTAKE_POWER       = 1.00;
 
     // Intake pulse pattern when shooting
-    private static long   INTAKE_PULSE_ON_MS  = 1500L; // on window
-    private static long   INTAKE_PULSE_OFF_MS = 500L; // off window between pulses
+    private static long   INTAKE_PULSE_ON_MS  = 3000L; // on duration
+    private static long   INTAKE_PULSE_OFF_MS = 1000L; // off duration between pulses
     private static long   SHOOT_WINDOW_MS     = 10000L; // total time for a shoot phase
 
     // Lift positions (if used)
     private static double LIFT_LOWERED = 0.10;
     private static double LIFT_RAISED  = 0.65;
     private static boolean USE_LIFT    = true; // flip to false if no lift gate
+
+    // Delay after commanding lift open before intake may run
+    private static long   LIFT_TO_INTAKE_DELAY_MS = 1000L; // 1.0s (tunable)
+
+    // NEW: settle delay at shoot pose BEFORE starting TOF scan
+    private static long   SETTLE_BEFORE_SCAN_MS   = 1000L; // 1.0s (tunable)
 
     // Distance→RPM mapping (feet)
     //   rpm = M_RPM_PER_FT * feet + B_RPM_OFFSET  (clamped to [WHEEL_MIN_RPM, WHEEL_MAX_RPM])
@@ -85,15 +79,12 @@ public class BjornAUTO2 extends OpMode {
     private static double GEAR_RATIO        = 1.0;
     private static double TPR               = MOTOR_ENCODER_CPR * GEAR_RATIO;
 
-    // Delay between lift opening and intake start (ms)
-    private static final long INTAKE_DELAY_AFTER_LIFT_MS = 100L; // **1.5 seconds**
-
     // ---------------- Poses ----------------
     private static final Pose START       = pose(0, 0, 265); //129
     private static final Pose SHOOT_ZONE  = pose( 4.5, 33, -95);
-    private static final Pose ALIGN1      = pose(23, 36, -58);
-    private static final Pose GRAB1       = pose(30.2, 17.8, -58);
-    private static final Pose ALIGN1_BACK = pose(23, 36, -58);
+    private static final Pose ALIGN1      = pose(23, 31, -58);
+    private static final Pose GRAB1       = pose(32.4, 13, -58);
+    private static final Pose ALIGN1_BACK = pose(23, 31, -58);
     private static final Pose ALIGN2      = pose(35.3, 52.8, -58);
     private static final Pose GRAB2       = pose(47, 32.3, -58);
     private static final Pose PARK        = pose(24, 52, -145);
@@ -114,15 +105,20 @@ public class BjornAUTO2 extends OpMode {
 
     // Shooter controller
     private double targetRpm = 0;
+    private boolean wheelOn = false;
     private boolean ready = false;
 
-    // Timing
-    private long shootPhaseStart = -1;  // shoot-phase start time
-    private long pulseAnchor = -1;      // base timestamp for pulses
-    private long readySinceMs = -1;     // first moment wheel became ready (for intake delay)
+    // Pulse/phase timers
+    private long shootPhaseStart = -1;
+    private long pulseAnchor     = -1; // base timestamp for pulses
+    private boolean intakeOn     = false;
 
-    // Intake state
-    private boolean intakeOn = false;
+    // Gate: when lift was commanded open (for intake gating)
+    private long liftOpenedAt = -1; // -1 = not open / not yet timed
+
+    // NEW: settle-before-scan handling
+    private boolean scanStarted  = false;
+    private long    scanDelayUntil = -1; // time when scanning may begin
 
     // Scan buffer
     private int scanLeft = 0;
@@ -138,13 +134,11 @@ public class BjornAUTO2 extends OpMode {
         Lift   = hardwareMap.get(Servo.class,     "Lift");
         tof    = hardwareMap.get(DistanceSensor.class, "TOF");
 
-        // Motor behaviors
+        // Motor directions & behaviors
         Intake.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
-      //  Wheel.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
         Intake.setDirection(DcMotor.Direction.REVERSE);
-       // Wheel.setDirection(DcMotor.Direction.REVERSE);
 
-        // Paths
+        // Build paths
         toShoot      = line(START,       SHOOT_ZONE);
         toAlign1     = line(SHOOT_ZONE,  ALIGN1);
         toGrab1      = line(ALIGN1,      GRAB1);
@@ -220,15 +214,19 @@ public class BjornAUTO2 extends OpMode {
                 break;
 
             case DONE:
+                // hold final pose
                 break;
         }
 
-        // Telemetry (now includes live RPM)
-        double currentRpm = toRPM(safeVel(Wheel), TPR);
+        // Minimal telemetry
+        long now = System.currentTimeMillis();
         telemetry.addData("State", state);
-        telemetry.addData("RPM target", (int) targetRpm);
-        telemetry.addData("RPM current", (int) currentRpm);
+        telemetry.addData("RPM target", (int)targetRpm);
         telemetry.addData("Wheel ready", ready);
+        long waitRemaining = (liftOpenedAt < 0) ? -1 : Math.max(0, LIFT_TO_INTAKE_DELAY_MS - (now - liftOpenedAt));
+        telemetry.addData("Lift→Intake wait (ms)", waitRemaining);
+        long settleRemain = (scanDelayUntil < 0) ? -1 : Math.max(0, scanDelayUntil - now);
+        telemetry.addData("Settle→Scan wait (ms)", settleRemain);
         telemetry.update();
     }
 
@@ -236,20 +234,31 @@ public class BjornAUTO2 extends OpMode {
     private void beginShootPhase() {
         shootPhaseStart = System.currentTimeMillis();
         pulseAnchor     = shootPhaseStart;
-        readySinceMs    = -1;
         intakeOn        = false;
-        ready           = false;
+        liftOpenedAt    = -1; // reset gate timer each shoot phase
 
-        // start wheel at idle, then scan to dynamic RPM
+        // Start wheel at idle immediately; we want it spinning during settle
         setWheelRPM(WHEEL_IDLE_RPM);
+
+        // Lift closed until the wheel is ready
         if (USE_LIFT) Lift.setPosition(LIFT_LOWERED);
-        beginScan();
+
+        // NEW: arm a delayed scan start; do NOT begin scanning yet
+        scanStarted    = false;
+        scanDelayUntil = shootPhaseStart + SETTLE_BEFORE_SCAN_MS;
+        scanLeft       = 0; // ensure we don't accidentally consume any prior buffer
     }
 
     /** Returns true when the shoot window completes. */
     private boolean runShootPhase() {
         long now = System.currentTimeMillis();
         long elapsed = now - shootPhaseStart;
+
+        // NEW: kick off scan AFTER settle delay
+        if (!scanStarted && now >= scanDelayUntil) {
+            beginScan();
+            scanStarted = true;
+        }
 
         // 1) Finish scan → compute dynamic RPM once
         if (scanLeft > 0) {
@@ -261,29 +270,36 @@ public class BjornAUTO2 extends OpMode {
                 if (inchesMed > 6 && inchesMed <= 120) {
                     double ft = inchesMed / 12.0 + SENSOR_OFFSET_FT;
                     double dyn = clamp(M_RPM_PER_FT * ft + B_RPM_OFFSET, WHEEL_MIN_RPM, WHEEL_MAX_RPM);
-                    setWheelRPM(dyn);
+                    setWheelRPM(dyn); // flywheel keeps spinning regardless of intake gating
                 } else {
                     setWheelRPM((WHEEL_MIN_RPM + WHEEL_MAX_RPM) * 0.5);
                 }
             }
         }
 
-        // 2) Readiness check with hysteresis
+        // 2) Simple readiness check with hysteresis
         double wheelRpm = toRPM(safeVel(Wheel), TPR);
-        if (!ready && wheelRpm >= READY_ON_RPM) {
-            ready = true;
-            readySinceMs = now; // mark the moment the wheel is considered ready
-            if (USE_LIFT) Lift.setPosition(LIFT_RAISED); // open lift now
-        }
-        if (ready && wheelRpm <= READY_OFF_RPM) {
-            ready = false; // dropped out of ready band
-            readySinceMs = -1;
-            if (USE_LIFT) Lift.setPosition(LIFT_LOWERED);
+        if (!ready && wheelRpm >= READY_ON_RPM) ready = true;
+        if (ready && wheelRpm <= READY_OFF_RPM) ready = false;
+
+        // 3) Lift behavior + gate intake by delay AFTER lift opens
+        boolean liftGatePassed;
+        if (USE_LIFT) {
+            if (ready) {
+                Lift.setPosition(LIFT_RAISED);
+                if (liftOpenedAt < 0) liftOpenedAt = now; // start delay the first time we open
+            } else {
+                Lift.setPosition(LIFT_LOWERED);
+                liftOpenedAt = -1; // reset if we close the lift
+            }
+            liftGatePassed = (liftOpenedAt >= 0) && (now - liftOpenedAt >= LIFT_TO_INTAKE_DELAY_MS);
+        } else {
+            liftGatePassed = true; // no lift → no gating
         }
 
-        // 3) Intake pulsing only AFTER delay from lift open
-        boolean pastDelay = ready && readySinceMs > 0 && (now - readySinceMs) >= INTAKE_DELAY_AFTER_LIFT_MS;
-        if (pastDelay) {
+        // 4) Intake pulsing ONLY when wheel is ready AND lift-open delay has passed
+        boolean allowIntake = ready && liftGatePassed;
+        if (allowIntake) {
             long sinceAnchor = now - pulseAnchor;
             long period = INTAKE_PULSE_ON_MS + INTAKE_PULSE_OFF_MS;
             long m = sinceAnchor % period;
@@ -293,11 +309,10 @@ public class BjornAUTO2 extends OpMode {
                 Intake.setPower(intakeOn ? INTAKE_POWER : 0.0);
             }
         } else {
-            // keep intake off until the 1.5s delay has elapsed
             if (intakeOn) { intakeOn = false; Intake.setPower(0.0); }
         }
 
-        // 4) End of shoot window
+        // 5) End of shoot window
         if (elapsed >= SHOOT_WINDOW_MS) {
             Intake.setPower(0.0);
             if (USE_LIFT) Lift.setPosition(LIFT_LOWERED);
@@ -329,6 +344,7 @@ public class BjornAUTO2 extends OpMode {
         // If you have RUN_USING_ENCODER+PIDF, replace this with setVelocity(tps) using TPR.
         double pwr = (rpm <= 0) ? 0.0 : clamp(rpm / WHEEL_MAX_RPM, 0.0, 1.0);
         Wheel.setPower(pwr);
+        wheelOn = pwr > 0.02;
     }
 
     // ---------------- Scan utils ----------------

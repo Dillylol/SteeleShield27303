@@ -53,7 +53,7 @@ public class BjornTele extends OpMode {
 
     // Servo positions
     private static final double LIFT_LOWERED_POS = 0.10;
-    private static final double LIFT_RAISED_POS  = 0.85;
+    private static final double LIFT_RAISED_POS  = 0.70;
 
     // Dynamic lift readiness
     private static final double READY_TOL_RPM = 250.0;       // ± band
@@ -74,8 +74,8 @@ public class BjornTele extends OpMode {
     private static final double IDLE_RPM = 2000.0; // choose your idle speed
 
     // Linear fit RPM ≈ m*Dft + b  (distance from robot front)
-    private static final double M_RPM_PER_FT = 83.3;
-    private static final double B_RPM_OFFSET = 2364.0;
+    private static final double M_RPM_PER_FT = 116.4042383594456;
+    private static final double B_RPM_OFFSET = 2084.2966941424975;
 
     // ToF scan state (also invoked automatically on B before ramp)
     private static final int SCAN_SAMPLES = 10;
@@ -104,7 +104,7 @@ public class BjornTele extends OpMode {
         FrontR.setDirection(DcMotor.Direction.REVERSE);
         BackR.setDirection(DcMotor.Direction.REVERSE);
         Intake.setDirection(DcMotor.Direction.REVERSE);
-        Wheel.setDirection(DcMotor.Direction.REVERSE);
+        //Wheel.setDirection(DcMotor.Direction.REVERSE);
 
         DcMotor.ZeroPowerBehavior brake = DcMotor.ZeroPowerBehavior.BRAKE;
         FrontL.setZeroPowerBehavior(brake);
