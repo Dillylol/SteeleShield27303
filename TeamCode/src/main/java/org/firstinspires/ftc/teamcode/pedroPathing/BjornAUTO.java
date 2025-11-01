@@ -19,7 +19,7 @@ import java.util.Deque;
 /**
  * BjornAUTO — Pedro V2 Panels auto with intake-on Phase 1 and safe launch at finish.
  */
-@Autonomous(name = "BjornAUTO (V2 Panels + SafeLaunch)", group = "Pedro Pathing")
+@Autonomous(name = "DontUSEthis2", group = "Pedro Pathing")
 public class BjornAUTO extends OpMode {
 
     // ───────── Speeds / powers ─────────

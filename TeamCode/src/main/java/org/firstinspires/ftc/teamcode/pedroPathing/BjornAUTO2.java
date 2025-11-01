@@ -35,7 +35,7 @@ import java.util.Arrays;
  *   H)  ( 6, 35, -95)  → Activate shooter (pulse intake, dynamic RPM)
  *   I)  (30, 52, -145) → Leave / park
  */
-@Autonomous(name = "BjornAUTO2")
+@Autonomous(name = "DONTUSE")
 public class BjornAUTO2 extends OpMode {
 
     // ---------------- Hardware ----------------

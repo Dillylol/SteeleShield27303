@@ -24,7 +24,7 @@ import java.util.Arrays;
  * Pathing, lift behavior, and intake controls mirror latest versions.
  * Flywheel only is upgraded to dual-stage control.
  */
-@Autonomous(name = "BjornAUTO2 (Chase→PIDF Handover)")
+@Autonomous(name = "or this")
 public class BjornAUTO2_DualStage extends OpMode {
     // ---------------- Hardware ----------------
     private Follower follower;

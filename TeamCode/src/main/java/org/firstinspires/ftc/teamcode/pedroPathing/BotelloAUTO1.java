@@ -18,12 +18,13 @@ import java.util.Arrays;
 /**
  * BjornAUTO2 — TeleOp-inspired autonomous with dynamic flywheel RPM and intake pulses.
  *
- * Change requested: when the lift opens, wait a fixed delay BEFORE allowing the intake to run,
- * and add a 1s "settle" delay AFTER reaching the shooting pose BEFORE starting the TOF scan.
- * - Flywheel keeps spinning the whole time; only intake is gated by the lift-open delay.
- * - TOF scanning is delayed ~1s after the robot reaches the shoot pose to improve aim stability.
+ * Updates in this revision:
+ * 1) Added FINAL_RPM_OFFSET to bias the final computed launch RPM (to compensate undershoot/overshoot).
+ * 2) Moved Lift servo motion out of init() and into start() so it does not move during initialization.
+ * 3) Preserved: 1s settle delay before TOF scan; intake is gated by lift-open delay.
+ * 4) CHANGE: Keep intake ON through GRAB and the return to ALIGN1_BACK; turn it OFF only after reaching ALIGN1_BACK.
  */
-@Autonomous(name = "BOT")
+@Autonomous(name = "BjornAUTO")
 public class BotelloAUTO1 extends OpMode {
 
     // ---------------- Hardware ----------------
@@ -58,13 +59,17 @@ public class BotelloAUTO1 extends OpMode {
     // Delay after commanding lift open before intake may run
     private static long   LIFT_TO_INTAKE_DELAY_MS = 1000L; // 1.0s (tunable)
 
-    // NEW: settle delay at shoot pose BEFORE starting TOF scan
-    private static long   SETTLE_BEFORE_SCAN_MS   = 500L; // 1.0s (tunable)
+    // Settle delay at shoot pose BEFORE starting TOF scan
+    private static long   SETTLE_BEFORE_SCAN_MS   = 500L; // 0.5s (tunable)
 
     // Distance→RPM mapping (feet)
     //   rpm = M_RPM_PER_FT * feet + B_RPM_OFFSET  (clamped to [WHEEL_MIN_RPM, WHEEL_MAX_RPM])
     private static double M_RPM_PER_FT = 116.4042383594456;
     private static double B_RPM_OFFSET = 2084.2966941424975;
+
+    // NEW: final RPM bias to compensate small undershoot/overshoot
+    // Positive values add RPM; negative values subtract. Applied only to the final launch RPM.
+    private static double FINAL_RPM_OFFSET = 0.0;
 
     // Hysteresis (for deciding if wheel is "ready")
     private static double READY_ON_RPM  = 2200; // consider ready when >= this
@@ -85,8 +90,8 @@ public class BotelloAUTO1 extends OpMode {
     private static final Pose ALIGN1      = pose(22.6, 37.7, -58);
     private static final Pose GRAB1       = pose(32.9, 16, -58);
     private static final Pose ALIGN1_BACK = pose(23, 31, -58);
-    private static final Pose ALIGN2      = pose(35.3, 52.8, -58);
-    private static final Pose GRAB2       = pose(47, 32.3, -58);
+    //private static final Pose ALIGN2      = pose(35.3, 52.8, -58);
+    // private static final Pose GRAB2       = pose(47, 32.3, -58);
     private static final Pose PARK        = pose(24, 52, -145);
 
     // ---------------- Paths ----------------
@@ -116,7 +121,7 @@ public class BotelloAUTO1 extends OpMode {
     // Gate: when lift was commanded open (for intake gating)
     private long liftOpenedAt = -1; // -1 = not open / not yet timed
 
-    // NEW: settle-before-scan handling
+    // Settle-before-scan handling
     private boolean scanStarted  = false;
     private long    scanDelayUntil = -1; // time when scanning may begin
 
@@ -144,20 +149,24 @@ public class BotelloAUTO1 extends OpMode {
         toGrab1      = line(ALIGN1,      GRAB1);
         toAlign1Back = line(GRAB1,       ALIGN1_BACK);
         toShoot2     = line(ALIGN1_BACK, SHOOT_ZONE);
-        toAlign2     = line(SHOOT_ZONE,  ALIGN2);
-        toGrab2      = line(ALIGN2,      GRAB2);
-        toShoot3     = line(GRAB2,       SHOOT_ZONE);
         toPark       = line(SHOOT_ZONE,  PARK);
 
-        // Init mechanisms
+
+        // Init mechanisms — do NOT move servos here to avoid pre-start motion
         setWheelRPM(0);
         Intake.setPower(0);
-        if (USE_LIFT) Lift.setPosition(LIFT_LOWERED);
+        // (Lift position will be set in start())
 
-        // Start
+        // Start motion pre-armed as in your original flow
         setDriveSpeed(DRIVE_SPEED_ALIGN);
         follower.followPath(toShoot);
         state = State.TO_SHOOT;
+    }
+
+    @Override
+    public void start() {
+        // Move servos on start to comply with "no movement during init" requirement
+        if (USE_LIFT) Lift.setPosition(LIFT_LOWERED);
     }
 
     @Override
@@ -178,11 +187,13 @@ public class BotelloAUTO1 extends OpMode {
                 break;
 
             case TO_GRAB1:
-                if (follower.atParametricEnd()) { setWheelRPM(WHEEL_IDLE_RPM); follower.followPath(toAlign1Back, true); Intake.setPower(0); state = State.TO_ALIGN1_BACK; }
+                // CHANGE: keep intake ON while returning to ALIGN1_BACK (do NOT turn off here)
+                if (follower.atParametricEnd()) { setWheelRPM(WHEEL_IDLE_RPM); follower.followPath(toAlign1Back, true); /*Intake.setPower(0);*/ state = State.TO_ALIGN1_BACK; }
                 break;
 
             case TO_ALIGN1_BACK:
-                if (follower.atParametricEnd()) { follower.followPath(toShoot2, true); state = State.TO_SHOOT2; }
+                // CHANGE: turn intake OFF only after we have reached ALIGN1_BACK
+                if (follower.atParametricEnd()) { Intake.setPower(0); follower.followPath(toShoot2, true); state = State.TO_SHOOT2; }
                 break;
 
             case TO_SHOOT2:
@@ -190,9 +201,9 @@ public class BotelloAUTO1 extends OpMode {
                 break;
 
             case SHOOT2:
-                if (runShootPhase()) { follower.followPath(toAlign2, true); state = State.TO_ALIGN2; }
+                if (runShootPhase()) { follower.followPath(toPark, true); state = State.TO_PARK; }
                 break;
-
+/*
             case TO_ALIGN2:
                 if (follower.atParametricEnd()) { Intake.setPower(INTAKE_POWER); follower.followPath(toGrab2, true); state = State.TO_GRAB2; }
                 break;
@@ -212,7 +223,7 @@ public class BotelloAUTO1 extends OpMode {
             case TO_PARK:
                 if (follower.atParametricEnd()) { shutdown(); state = State.DONE; }
                 break;
-
+*/
             case DONE:
                 // hold final pose
                 break;
@@ -222,6 +233,7 @@ public class BotelloAUTO1 extends OpMode {
         long now = System.currentTimeMillis();
         telemetry.addData("State", state);
         telemetry.addData("RPM target", (int)targetRpm);
+        telemetry.addData("Final RPM offset", (int)FINAL_RPM_OFFSET);
         telemetry.addData("Wheel ready", ready);
         long waitRemaining = (liftOpenedAt < 0) ? -1 : Math.max(0, LIFT_TO_INTAKE_DELAY_MS - (now - liftOpenedAt));
         telemetry.addData("Lift→Intake wait (ms)", waitRemaining);
@@ -240,10 +252,10 @@ public class BotelloAUTO1 extends OpMode {
         // Start wheel at idle immediately; we want it spinning during settle
         setWheelRPM(WHEEL_IDLE_RPM);
 
-        // Lift closed until the wheel is ready
+        // Lift closed until the wheel is ready (runtime movement only)
         if (USE_LIFT) Lift.setPosition(LIFT_LOWERED);
 
-        // NEW: arm a delayed scan start; do NOT begin scanning yet
+        // Arm a delayed scan start; do NOT begin scanning yet
         scanStarted    = false;
         scanDelayUntil = shootPhaseStart + SETTLE_BEFORE_SCAN_MS;
         scanLeft       = 0; // ensure we don't accidentally consume any prior buffer
@@ -254,7 +266,7 @@ public class BotelloAUTO1 extends OpMode {
         long now = System.currentTimeMillis();
         long elapsed = now - shootPhaseStart;
 
-        // NEW: kick off scan AFTER settle delay
+        // Kick off scan AFTER settle delay
         if (!scanStarted && now >= scanDelayUntil) {
             beginScan();
             scanStarted = true;
@@ -270,9 +282,11 @@ public class BotelloAUTO1 extends OpMode {
                 if (inchesMed > 6 && inchesMed <= 120) {
                     double ft = inchesMed / 12.0 + SENSOR_OFFSET_FT;
                     double dyn = clamp(M_RPM_PER_FT * ft + B_RPM_OFFSET, WHEEL_MIN_RPM, WHEEL_MAX_RPM);
-                    setWheelRPM(dyn); // flywheel keeps spinning regardless of intake gating
+                    double biased = clamp(dyn + FINAL_RPM_OFFSET, WHEEL_MIN_RPM, WHEEL_MAX_RPM);
+                    setWheelRPM(biased); // apply final offset only to the launch target
                 } else {
-                    setWheelRPM((WHEEL_MIN_RPM + WHEEL_MAX_RPM) * 0.5);
+                    double fallback = (WHEEL_MIN_RPM + WHEEL_MAX_RPM) * 0.5;
+                    setWheelRPM(clamp(fallback + FINAL_RPM_OFFSET, WHEEL_MIN_RPM, WHEEL_MAX_RPM));
                 }
             }
         }
@@ -373,3 +387,4 @@ public class BotelloAUTO1 extends OpMode {
         if (USE_LIFT) Lift.setPosition(LIFT_LOWERED);
     }
 }
+// Certified Dylen Vasquez Design

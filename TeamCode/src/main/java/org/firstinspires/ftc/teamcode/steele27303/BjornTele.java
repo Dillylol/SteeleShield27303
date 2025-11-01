@@ -16,7 +16,7 @@ import com.qualcomm.robotcore.hardware.DistanceSensor;
 
 import java.util.Arrays;
 
-@TeleOp(name = "BjornTele")
+@TeleOp(name = "BjornTele (DualPad)")
 public class BjornTele extends OpMode {
 
     // Drive motors (stay DcMotor – no velocity reads)
@@ -37,12 +37,19 @@ public class BjornTele extends OpMode {
     // ToF distance sensor at the very front (matches your measurement reference)
     private DistanceSensor tofFront;
 
+    // ===== Dual-Gamepad Redundancy =====
+    // Master switch (on gamepad1 D-Pad LEFT) grants full DRIVE control to gamepad2.
+    // Regardless of master, gamepad2 ALWAYS has full control of INTAKE and WHEEL systems.
+    private boolean g2DriveMaster = false; // when true, gamepad2 drives
+    private boolean g1DpadLeftPrev = false; // edge detect for master toggle
+
     // Toggles
     private boolean isWheelOn  = false;   // B toggles ramped (dynamic) mode
-    private boolean bWasPressed = false;
+    private boolean g1BPrev = false, g2BPrev = false;
 
     // Button edges for trims / scan / yaw reset / idle
-    private boolean rbPrev=false, lbPrev=false, dpadUpPrev=false, dpadDownPrev=false;
+    private boolean g1RbPrev=false, g1LbPrev=false, g1DpadUpPrev=false, g1DpadDownPrev=false;
+    private boolean g2RbPrev=false, g2LbPrev=false, g2DpadUpPrev=false, g2DpadDownPrev=false;
 
     // Motor/encoder constants
     private static final double MOTOR_ENCODER_CPR = 28.0;
@@ -70,7 +77,7 @@ public class BjornTele extends OpMode {
     private static final double RPM_MAX    = 3800.0;
 
     // Always-on idle spin (keeps momentum)
-    private boolean idleSpinEnabled = false;     // toggled by D-Pad Up
+    private boolean idleSpinEnabled = false;     // toggled by D-Pad Up (g1 or g2)
     private static final double IDLE_RPM = 2000.0; // choose your idle speed
 
     // Linear fit RPM ≈ m*Dft + b  (distance from robot front)
@@ -125,7 +132,7 @@ public class BjornTele extends OpMode {
                 RevHubOrientationOnRobot.UsbFacingDirection.UP));
         imu.initialize(params);
 
-        panels.addData("Status", "Init complete (idle toggle + ToF scan + dynamic ramp)");
+        panels.addData("Status", "Init complete (DualPad redundancy ready)");
         panels.update();
     }
 
@@ -138,10 +145,19 @@ public class BjornTele extends OpMode {
 
     @Override
     public void loop() {
+        // ===== Master toggle: gamepad1 D-Pad LEFT =====
+        if (gamepad1.dpad_left && !g1DpadLeftPrev) {
+            g2DriveMaster = !g2DriveMaster; // switch drive control source
+        }
+        g1DpadLeftPrev = gamepad1.dpad_left;
+
+        // ===== Select active driving pad =====
+        boolean useG2ForDrive = g2DriveMaster;
+        double y  = -(useG2ForDrive ? gamepad2.left_stick_y  : gamepad1.left_stick_y);
+        double x  =  (useG2ForDrive ? gamepad2.left_stick_x  : gamepad1.left_stick_x) * 1.1;
+        double rx =  (useG2ForDrive ? gamepad2.right_stick_x : gamepad1.right_stick_x);
+
         // Field-centric drive
-        double y  = -gamepad1.left_stick_y;
-        double x  =  gamepad1.left_stick_x * 1.1;
-        double rx =  gamepad1.right_stick_x;
         double heading = imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.RADIANS);
         double rotX = x * Math.cos(-heading) - y * Math.sin(-heading);
         double rotY = x * Math.sin(-heading) + y * Math.cos(-heading);
@@ -153,43 +169,54 @@ public class BjornTele extends OpMode {
         FrontL.setPower(fl);  FrontR.setPower(fr);
         BackL.setPower(bl);   BackR.setPower(br);
 
-        // Intake
-        double intakeCmd = gamepad1.a ? 1.0 : (gamepad1.x ? -1.0 : 0.0);
+        // ===== Intake (gamepad2 has full control; if neutral, fall back to gamepad1) =====
+        double intakeCmdG2 = gamepad2.a ? 1.0 : (gamepad2.x ? -1.0 : 0.0);
+        double intakeCmdG1 = gamepad1.a ? 1.0 : (gamepad1.x ? -1.0 : 0.0);
+        double intakeCmd = (intakeCmdG2 != 0.0) ? intakeCmdG2 : intakeCmdG1;
         Intake.setPower(intakeCmd);
 
-        // ===== Idle spin toggle on D-Pad Up =====
-        if (gamepad1.dpad_up && !dpadUpPrev) {
-            idleSpinEnabled = !idleSpinEnabled;
+        // ===== Idle spin toggle on D-Pad Up (either pad) =====
+        if (gamepad1.dpad_up && !g1DpadUpPrev) idleSpinEnabled = !idleSpinEnabled;
+        if (gamepad2.dpad_up && !g2DpadUpPrev) idleSpinEnabled = !idleSpinEnabled;
+        g1DpadUpPrev = gamepad1.dpad_up; g2DpadUpPrev = gamepad2.dpad_up;
+
+        // ===== IMU reset on D-Pad Down from the active driving pad =====
+        if (!useG2ForDrive) {
+            if (gamepad1.dpad_down && !g1DpadDownPrev) imu.resetYaw();
+        } else {
+            if (gamepad2.dpad_down && !g2DpadDownPrev) imu.resetYaw();
         }
-        dpadUpPrev = gamepad1.dpad_up;
+        g1DpadDownPrev = gamepad1.dpad_down; g2DpadDownPrev = gamepad2.dpad_down;
 
-        // ===== IMU reset on D-Pad Down =====
-        if (gamepad1.dpad_down && !dpadDownPrev) { imu.resetYaw(); }
-        dpadDownPrev = gamepad1.dpad_down;
-
-        // ===== Manual ToF scan on Y (edge) =====
-        if (gamepad1.y) { // simple edge-less: hold Y to re-scan quickly
+        // ===== Manual ToF scan on Y (either pad can request) =====
+        if (gamepad1.y || gamepad2.y) { // hold to re-scan quickly
             beginScan();
         }
 
-        // ===== Ramp to dynamic on B (with pre-scan) =====
-        if (gamepad1.b && !bWasPressed) {
-            // 1) quick pre-scan
+        // ===== Ramp to dynamic on B (either pad toggles). Pre-scan on the pad that pressed. =====
+        if (gamepad1.b && !g1BPrev) {
             beginScan();
-            // 2) enable dynamic mode
             isWheelOn = !isWheelOn;
-            // When entering dynamic ON and we have a last scan, set target RPM from it
             if (isWheelOn && !Double.isNaN(lastScanFt)) {
                 targetWheelRPM = clamp(rpmFromFeet(lastScanFt), RPM_MIN, RPM_MAX);
             }
         }
-        bWasPressed = gamepad1.b;
+        if (gamepad2.b && !g2BPrev) {
+            beginScan();
+            isWheelOn = !isWheelOn;
+            if (isWheelOn && !Double.isNaN(lastScanFt)) {
+                targetWheelRPM = clamp(rpmFromFeet(lastScanFt), RPM_MIN, RPM_MAX);
+            }
+        }
+        g1BPrev = gamepad1.b; g2BPrev = gamepad2.b;
 
-        // Small trims
-        if (gamepad1.right_bumper && !rbPrev) adjustTargetRPM(+STEP_SMALL);
-        if (gamepad1.left_bumper  && !lbPrev) adjustTargetRPM(-STEP_SMALL);
-        rbPrev = gamepad1.right_bumper;
-        lbPrev = gamepad1.left_bumper;
+        // Small trims (either pad)
+        if (gamepad1.right_bumper && !g1RbPrev) adjustTargetRPM(+STEP_SMALL);
+        if (gamepad1.left_bumper  && !g1LbPrev) adjustTargetRPM(-STEP_SMALL);
+        if (gamepad2.right_bumper && !g2RbPrev) adjustTargetRPM(+STEP_SMALL);
+        if (gamepad2.left_bumper  && !g2LbPrev) adjustTargetRPM(-STEP_SMALL);
+        g1RbPrev = gamepad1.right_bumper; g1LbPrev = gamepad1.left_bumper;
+        g2RbPrev = gamepad2.right_bumper; g2LbPrev = gamepad2.left_bumper;
 
         // If scanning, collect one sample per loop and compute target on completion
         if (scanLeft > 0) {
@@ -201,7 +228,6 @@ public class BjornTele extends OpMode {
                 if (inchesMed > 6 && inchesMed <= 96) { // up to ~8 ft
                     double ft = inchesMed / 12.0 + SENSOR_TO_CANNON_OFFSET_FT;
                     lastScanFt = ft;
-                    // Only update dynamic target when ramp mode is ON; otherwise it's just cached
                     if (isWheelOn) targetWheelRPM = clamp(rpmFromFeet(ft), RPM_MIN, RPM_MAX);
                 }
             }
@@ -255,6 +281,8 @@ public class BjornTele extends OpMode {
         double tofNowFt = (tofNowIn > 0) ? tofNowIn/12.0 : Double.NaN;
         double distFtDisplay = (!Double.isNaN(lastScanFt)) ? lastScanFt
                 : (!Double.isNaN(tofNowFt) ? tofNowFt : Double.NaN);
+        telemetry.addData("Active Driver", g2DriveMaster ? "Gamepad2" : "Gamepad1");
+        telemetry.addData("G2 Drive Master", g2DriveMaster);
         telemetry.addData("Wheel RPM tgt", "%.0f", isWheelOn ? targetWheelRPM : (idleSpinEnabled ? IDLE_RPM : 0.0));
         telemetry.addData("Wheel RPM act", "%.0f", wheelRpm);
         telemetry.addData("Distance (ft)", (Double.isNaN(distFtDisplay) ? "—" : String.format("%.2f", distFtDisplay)));
@@ -262,14 +290,12 @@ public class BjornTele extends OpMode {
         telemetry.update();
 
         // ===== Panels (debug) =====
+        panels.addData("ActiveDriver", g2DriveMaster ? "G2" : "G1");
+        panels.addData("G2DriveMaster", g2DriveMaster);
         panels.addData("Wheel_ON(DYN)",  isWheelOn);
         panels.addData("IdleSpin", idleSpinEnabled);
         panels.addData("RPM_target", targetWheelRPM);
-        panels.addData("RPM_meas",   wheelRpm);
-        panels.addData("ToF_in_now", tofNowIn);
-        panels.addData("ToF_ft_lastScan", lastScanFt);
         panels.addData("Battery_V",  getBatteryVoltage());
-        panels.addData("Lift_Pos",   Lift.getPosition());
         panels.addData("LiftRaised", liftIsRaised);
         panels.update();
     }
