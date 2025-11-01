@@ -93,7 +93,7 @@ public class BjornTele_TuneRPM extends OpMode {
         FrontR.setDirection(DcMotor.Direction.REVERSE);
         BackR.setDirection(DcMotor.Direction.REVERSE);
         Intake.setDirection(DcMotor.Direction.REVERSE);
-        Wheel.setDirection(DcMotor.Direction.REVERSE);
+       // Wheel.setDirection(DcMotor.Direction.REVERSE);
 
         DcMotor.ZeroPowerBehavior brake = DcMotor.ZeroPowerBehavior.BRAKE;
         FrontL.setZeroPowerBehavior(brake);

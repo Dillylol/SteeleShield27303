@@ -59,7 +59,7 @@ public class BotelloAUTO1 extends OpMode {
     private static long   LIFT_TO_INTAKE_DELAY_MS = 1000L; // 1.0s (tunable)
 
     // NEW: settle delay at shoot pose BEFORE starting TOF scan
-    private static long   SETTLE_BEFORE_SCAN_MS   = 1000L; // 1.0s (tunable)
+    private static long   SETTLE_BEFORE_SCAN_MS   = 500L; // 1.0s (tunable)
 
     // Distance→RPM mapping (feet)
     //   rpm = M_RPM_PER_FT * feet + B_RPM_OFFSET  (clamped to [WHEEL_MIN_RPM, WHEEL_MAX_RPM])
@@ -81,9 +81,9 @@ public class BotelloAUTO1 extends OpMode {
 
     // ---------------- Poses ----------------
     private static final Pose START       = pose(0, 0, 265); //129
-    private static final Pose SHOOT_ZONE  = pose( 4.5, 33, -95);
-    private static final Pose ALIGN1      = pose(23, 31, -58);
-    private static final Pose GRAB1       = pose(32.4, 13, -58);
+    private static final Pose SHOOT_ZONE  = pose( 0, 25, -90);
+    private static final Pose ALIGN1      = pose(22.6, 37.7, -58);
+    private static final Pose GRAB1       = pose(32.9, 16, -58);
     private static final Pose ALIGN1_BACK = pose(23, 31, -58);
     private static final Pose ALIGN2      = pose(35.3, 52.8, -58);
     private static final Pose GRAB2       = pose(47, 32.3, -58);
