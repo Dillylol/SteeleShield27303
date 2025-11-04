@@ -14,6 +14,9 @@ import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
 import com.qualcomm.robotcore.hardware.DistanceSensor;
 
+import org.firstinspires.ftc.teamcode.common.BjornConstants;
+import org.firstinspires.ftc.teamcode.common.BjornHardware;
+
 import java.util.Arrays;
 
 @TeleOp(name = "BjornTele (DualPad)")
@@ -58,10 +61,6 @@ public class BjornTele extends OpMode {
     private static final double INTAKE_TPR = MOTOR_ENCODER_CPR * INTAKE_GEAR_RATIO; // 560 for 20:1
     private static final double WHEEL_TPR  = MOTOR_ENCODER_CPR * WHEEL_GEAR_RATIO;  // 28 for 1:1
 
-    // Servo positions
-    private static final double LIFT_LOWERED_POS = 0.10;
-    private static final double LIFT_RAISED_POS  = 0.70;
-
     // Dynamic lift readiness
     private static final double READY_TOL_RPM = 250.0;       // ± band
     private static final double READY_MIN_TARGET_RPM = 2000.0;
@@ -95,38 +94,23 @@ public class BjornTele extends OpMode {
     public void init() {
         telemetry.setMsTransmissionInterval(50);
 
-        BackL  = hardwareMap.get(DcMotor.class, "lr");
-        BackR  = hardwareMap.get(DcMotor.class, "rr");
-        FrontL = hardwareMap.get(DcMotor.class, "lf");
-        FrontR = hardwareMap.get(DcMotor.class, "rf");
+        BjornHardware hardware = BjornHardware.forTeleOp(hardwareMap);
 
-        Intake = hardwareMap.get(DcMotorEx.class, "Intake");
-        Wheel  = hardwareMap.get(DcMotorEx.class, "Wheel");
+        BackL  = hardware.backLeft;
+        BackR  = hardware.backRight;
+        FrontL = hardware.frontLeft;
+        FrontR = hardware.frontRight;
 
-        Lift   = hardwareMap.get(Servo.class, "Lift");
-        tofFront = hardwareMap.get(DistanceSensor.class, "TOF");
+        Intake = hardware.intake;
+        Wheel  = hardware.wheel;
 
-        FrontL.setDirection(DcMotor.Direction.REVERSE);
-        BackL.setDirection(DcMotor.Direction.REVERSE);
-        FrontR.setDirection(DcMotor.Direction.REVERSE);
-        BackR.setDirection(DcMotor.Direction.REVERSE);
-        Intake.setDirection(DcMotor.Direction.REVERSE);
-        //Wheel.setDirection(DcMotor.Direction.REVERSE);
-
-        DcMotor.ZeroPowerBehavior brake = DcMotor.ZeroPowerBehavior.BRAKE;
-        FrontL.setZeroPowerBehavior(brake);
-        FrontR.setZeroPowerBehavior(brake);
-        BackL.setZeroPowerBehavior(brake);
-        BackR.setZeroPowerBehavior(brake);
-        Intake.setZeroPowerBehavior(brake);
-
-        Wheel.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
-        Wheel.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        Lift   = hardware.lift;
+        tofFront = hardware.frontTof;
 
         // No servo movement in init
         liftIsRaised = false;
 
-        imu = hardwareMap.get(IMU.class, "imu");
+        imu = hardware.imu;
         IMU.Parameters params = new IMU.Parameters(new RevHubOrientationOnRobot(
                 RevHubOrientationOnRobot.LogoFacingDirection.RIGHT,
                 RevHubOrientationOnRobot.UsbFacingDirection.UP));
@@ -139,7 +123,7 @@ public class BjornTele extends OpMode {
     @Override
     public void start() {
         // Safe default: keep lift closed at TeleOp start
-        try { Lift.setPosition(LIFT_LOWERED_POS); } catch (Exception ignored) {}
+        try { Lift.setPosition(BjornConstants.Servos.LIFT_LOWERED); } catch (Exception ignored) {}
         liftIsRaised = false;
     }
 
@@ -265,13 +249,13 @@ public class BjornTele extends OpMode {
             if (readyBandEnterMs < 0) readyBandEnterMs = nowMs;
             long dwell = nowMs - readyBandEnterMs;
             if (!liftIsRaised && dwell >= READY_HOLD_MS) {
-                try { Lift.setPosition(LIFT_RAISED_POS); } catch (Exception ignored) {}
+                try { Lift.setPosition(BjornConstants.Servos.LIFT_RAISED); } catch (Exception ignored) {}
                 liftIsRaised = true;
             }
         } else {
             readyBandEnterMs = -1;
             if (liftIsRaised) {
-                try { Lift.setPosition(LIFT_LOWERED_POS); } catch (Exception ignored) {}
+                try { Lift.setPosition(BjornConstants.Servos.LIFT_LOWERED); } catch (Exception ignored) {}
                 liftIsRaised = false;
             }
         }

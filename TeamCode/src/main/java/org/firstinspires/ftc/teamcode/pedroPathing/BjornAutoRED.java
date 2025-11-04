@@ -6,7 +6,6 @@ import com.pedropathing.geometry.Pose;
 import com.pedropathing.paths.PathChain;
 import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
-import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.DistanceSensor;
 import com.qualcomm.robotcore.hardware.Servo;
@@ -14,6 +13,9 @@ import com.qualcomm.robotcore.hardware.Servo;
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
 
 import java.util.Arrays;
+
+import org.firstinspires.ftc.teamcode.common.BjornConstants;
+import org.firstinspires.ftc.teamcode.common.BjornHardware;
 
 /**
  * BjornAUTO2 — TeleOp-inspired autonomous with dynamic flywheel RPM and intake pulses.
@@ -50,8 +52,8 @@ public class BjornAutoRED extends OpMode {
     private static long   SHOOT_WINDOW_MS     = 10000L; // total time for a shoot phase
 
     // Lift positions (if used)
-    private static double LIFT_LOWERED = 0.10;
-    private static double LIFT_RAISED  = 0.65;
+    private static double LIFT_LOWERED = BjornConstants.Servos.LIFT_LOWERED;
+    private static double LIFT_RAISED  = BjornConstants.Servos.LIFT_RAISED;
     private static boolean USE_LIFT    = true; // flip to false if no lift gate
 
     // Delay after commanding lift open before intake may run
@@ -135,14 +137,12 @@ public class BjornAutoRED extends OpMode {
         follower = Constants.createFollower(hardwareMap); // your Pedro v1 helper
         follower.setStartingPose(new Pose(START.getX(), START.getY(), START.getHeading()));
 
-        Intake = hardwareMap.get(DcMotorEx.class, "Intake");
-        Wheel  = hardwareMap.get(DcMotorEx.class, "Wheel");
-        Lift   = hardwareMap.get(Servo.class,     "Lift");
-        tof    = hardwareMap.get(DistanceSensor.class, "TOF");
+        BjornHardware hardware = BjornHardware.forAutonomous(hardwareMap);
 
-        // Motor directions & behaviors
-        Intake.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
-        Intake.setDirection(DcMotor.Direction.REVERSE);
+        Intake = hardware.intake;
+        Wheel  = hardware.wheel;
+        Lift   = hardware.lift;
+        tof    = hardware.frontTof;
 
         // Build paths (Pedro v1 linear heading interpolation)
         toShoot      = line(START,       SHOOT_ZONE);
