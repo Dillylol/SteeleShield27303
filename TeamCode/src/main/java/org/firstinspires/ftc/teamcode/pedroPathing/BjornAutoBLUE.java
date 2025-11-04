@@ -24,8 +24,8 @@ import java.util.Arrays;
  * 3) Preserved: 1s settle delay before TOF scan; intake is gated by lift-open delay.
  * 4) CHANGE: Keep intake ON through GRAB and the return to ALIGN1_BACK; turn it OFF only after reaching ALIGN1_BACK.
  */
-@Autonomous(name = "OldBlueAuto")
-public class BotelloAUTO1 extends OpMode {
+@Autonomous(name = "BjornAutoBLUE")
+public class BjornAutoBLUE extends OpMode {
 
     // ---------------- Hardware ----------------
     private Follower follower;
@@ -44,7 +44,7 @@ public class BotelloAUTO1 extends OpMode {
     private static double WHEEL_MIN_RPM      = 2000;   // minimum usable for launches
 
     // Intake power
-    private static double INTAKE_POWER       = .50;
+    private static double INTAKE_POWER       = .70;
 
     // Intake pulse pattern when shooting
     private static long   INTAKE_PULSE_ON_MS  = 3000L; // on duration
@@ -69,7 +69,7 @@ public class BotelloAUTO1 extends OpMode {
 
     // NEW: final RPM bias to compensate small undershoot/overshoot
     // Positive values add RPM; negative values subtract. Applied only to the final launch RPM.
-    private static double FINAL_RPM_OFFSET = 100.0;
+    private static double FINAL_RPM_OFFSET = 150.0;
 
     // Hysteresis (for deciding if wheel is "ready")
     private static double READY_ON_RPM  = 2200; // consider ready when >= this
@@ -86,13 +86,13 @@ public class BotelloAUTO1 extends OpMode {
 
     // ---------------- Poses ----------------
     private static final Pose START       = pose(0, 0, 265); //129
-    private static final Pose SHOOT_ZONE  = pose( 0, 25, -90);
+    private static final Pose SHOOT_ZONE  = pose( 0, 25, -85);
     private static final Pose ALIGN1      = pose(22.6, 37.7, -58);
     private static final Pose GRAB1       = pose(32.9, 16, -58);
     private static final Pose ALIGN1_BACK = pose(23, 31, -58);
     //private static final Pose ALIGN2      = pose(35.3, 52.8, -58);
     // private static final Pose GRAB2       = pose(47, 32.3, -58);
-    private static final Pose PARK        = pose(24, 52, -145);
+    private static final Pose PARK        = pose(28.6, 48.7, -145);
 
     // ---------------- Paths ----------------
     private PathChain toShoot, toAlign1, toGrab1, toAlign1Back, toShoot2, toAlign2, toGrab2, toShoot3, toPark;

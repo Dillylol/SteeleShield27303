@@ -18,14 +18,12 @@ import java.util.Arrays;
 /**
  * BjornAUTO2 — TeleOp-inspired autonomous with dynamic flywheel RPM and intake pulses.
  *
- * Updates in this revision:
- * 1) Added FINAL_RPM_OFFSET to bias the final computed launch RPM (to compensate undershoot/overshoot).
- * 2) Moved Lift servo motion out of init() and into start() so it does not move during initialization.
- * 3) Preserved: 1s settle delay before TOF scan; intake is gated by lift-open delay.
- * 4) CHANGE: Keep intake ON through GRAB and the return to ALIGN1_BACK; turn it OFF only after reaching ALIGN1_BACK.
+ * RED SIDE (mirrored from BLUE): (x, y, θ) → (−x, y, 180° − θ), θ normalized to (−180°, 180°].
+ * Includes: settle-before-scan, lift→intake delay gate, intake ON during GRAB + return to ALIGN1_BACK,
+ * final RPM bias, and full state machine. Uses the NEW Pedro packages (com.pedropathing.*).
  */
-@Autonomous(name = "OldBlueAuto")
-public class BotelloAUTO1 extends OpMode {
+@Autonomous(name = "BjornAutoRED")
+public class BjornAutoRED extends OpMode {
 
     // ---------------- Hardware ----------------
     private Follower follower;
@@ -44,7 +42,7 @@ public class BotelloAUTO1 extends OpMode {
     private static double WHEEL_MIN_RPM      = 2000;   // minimum usable for launches
 
     // Intake power
-    private static double INTAKE_POWER       = .50;
+    private static double INTAKE_POWER       = 0.70;
 
     // Intake pulse pattern when shooting
     private static long   INTAKE_PULSE_ON_MS  = 3000L; // on duration
@@ -67,9 +65,8 @@ public class BotelloAUTO1 extends OpMode {
     private static double M_RPM_PER_FT = 116.4042383594456;
     private static double B_RPM_OFFSET = 2084.2966941424975;
 
-    // NEW: final RPM bias to compensate small undershoot/overshoot
-    // Positive values add RPM; negative values subtract. Applied only to the final launch RPM.
-    private static double FINAL_RPM_OFFSET = 100.0;
+    // final RPM bias to compensate small undershoot/overshoot (applied only to final launch target)
+    private static double FINAL_RPM_OFFSET = 150.0; // + adds RPM, − subtracts
 
     // Hysteresis (for deciding if wheel is "ready")
     private static double READY_ON_RPM  = 2200; // consider ready when >= this
@@ -84,15 +81,19 @@ public class BotelloAUTO1 extends OpMode {
     private static double GEAR_RATIO        = 1.0;
     private static double TPR               = MOTOR_ENCODER_CPR * GEAR_RATIO;
 
-    // ---------------- Poses ----------------
-    private static final Pose START       = pose(0, 0, 265); //129
-    private static final Pose SHOOT_ZONE  = pose( 0, 25, -90);
-    private static final Pose ALIGN1      = pose(22.6, 37.7, -58);
-    private static final Pose GRAB1       = pose(32.9, 16, -58);
-    private static final Pose ALIGN1_BACK = pose(23, 31, -58);
-    //private static final Pose ALIGN2      = pose(35.3, 52.8, -58);
-    // private static final Pose GRAB2       = pose(47, 32.3, -58);
-    private static final Pose PARK        = pose(24, 52, -145);
+    // ---------------- RED Poses (mirrored from your BLUE) ----------------
+    // BLUE source (for reference):
+    //   START(0,0,265), SHOOT(0,25,-90), ALIGN1(22.6,37.7,-58), GRAB1(32.9,16,-58), ALIGN1_BACK(23,31,-58), PARK(24,52,-145)
+    // RED after mirror (x→-x, θ→180-θ):
+    private static final Pose START       = pose(  0.0,   0.0,  -85.0);
+    private static final Pose SHOOT_ZONE  = pose(  0.0,  25.0,  -85.0);
+    private static final Pose ALIGN1      = pose( -9.4, 32.9, -119.0);
+    private static final Pose GRAB1       = pose( -32.9, 16.0, -119.0);
+    private static final Pose ALIGN1_BACK = pose( -23.0, 31.0, -119.0);
+    // Optionals if you later restore them on BLUE:
+    // private static final Pose ALIGN2      = pose( -35.3, 52.8, -122.0);
+    // private static final Pose GRAB2       = pose( -47.0, 32.3, -122.0);
+    private static final Pose PARK        = pose( -24.0, 52.0,  -35.0);
 
     // ---------------- Paths ----------------
     private PathChain toShoot, toAlign1, toGrab1, toAlign1Back, toShoot2, toAlign2, toGrab2, toShoot3, toPark;
@@ -131,7 +132,7 @@ public class BotelloAUTO1 extends OpMode {
 
     @Override
     public void init() {
-        follower = Constants.createFollower(hardwareMap);
+        follower = Constants.createFollower(hardwareMap); // your Pedro v1 helper
         follower.setStartingPose(new Pose(START.getX(), START.getY(), START.getHeading()));
 
         Intake = hardwareMap.get(DcMotorEx.class, "Intake");
@@ -143,19 +144,21 @@ public class BotelloAUTO1 extends OpMode {
         Intake.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
         Intake.setDirection(DcMotor.Direction.REVERSE);
 
-        // Build paths
+        // Build paths (Pedro v1 linear heading interpolation)
         toShoot      = line(START,       SHOOT_ZONE);
         toAlign1     = line(SHOOT_ZONE,  ALIGN1);
         toGrab1      = line(ALIGN1,      GRAB1);
         toAlign1Back = line(GRAB1,       ALIGN1_BACK);
         toShoot2     = line(ALIGN1_BACK, SHOOT_ZONE);
         toPark       = line(SHOOT_ZONE,  PARK);
-
+        // If you later enable ALIGN2/GRAB2 legs, also build:
+        // toAlign2  = line(SHOOT_ZONE, ALIGN2);
+        // toGrab2   = line(ALIGN2,     GRAB2);
+        // toShoot3  = line(GRAB2,      SHOOT_ZONE);
 
         // Init mechanisms — do NOT move servos here to avoid pre-start motion
         setWheelRPM(0);
         Intake.setPower(0);
-        // (Lift position will be set in start())
 
         // Start motion pre-armed as in your original flow
         setDriveSpeed(DRIVE_SPEED_ALIGN);
@@ -187,12 +190,12 @@ public class BotelloAUTO1 extends OpMode {
                 break;
 
             case TO_GRAB1:
-                // CHANGE: keep intake ON while returning to ALIGN1_BACK (do NOT turn off here)
+                // Keep intake ON while returning to ALIGN1_BACK (do NOT turn off here)
                 if (follower.atParametricEnd()) { setWheelRPM(WHEEL_IDLE_RPM); follower.followPath(toAlign1Back, true); /*Intake.setPower(0);*/ state = State.TO_ALIGN1_BACK; }
                 break;
 
             case TO_ALIGN1_BACK:
-                // CHANGE: turn intake OFF only after we have reached ALIGN1_BACK
+                // Turn intake OFF only after we have reached ALIGN1_BACK
                 if (follower.atParametricEnd()) { Intake.setPower(0); follower.followPath(toShoot2, true); state = State.TO_SHOOT2; }
                 break;
 
@@ -203,7 +206,8 @@ public class BotelloAUTO1 extends OpMode {
             case SHOOT2:
                 if (runShootPhase()) { follower.followPath(toPark, true); state = State.TO_PARK; }
                 break;
-/*
+
+            /* If restoring second cycle later:
             case TO_ALIGN2:
                 if (follower.atParametricEnd()) { Intake.setPower(INTAKE_POWER); follower.followPath(toGrab2, true); state = State.TO_GRAB2; }
                 break;
@@ -218,12 +222,12 @@ public class BotelloAUTO1 extends OpMode {
 
             case SHOOT3:
                 if (runShootPhase()) { follower.followPath(toPark, true); state = State.TO_PARK; }
-                break;
+                break;*/
 
             case TO_PARK:
                 if (follower.atParametricEnd()) { shutdown(); state = State.DONE; }
                 break;
-*/
+
             case DONE:
                 // hold final pose
                 break;
@@ -249,7 +253,7 @@ public class BotelloAUTO1 extends OpMode {
         intakeOn        = false;
         liftOpenedAt    = -1; // reset gate timer each shoot phase
 
-        // Start wheel at idle immediately; we want it spinning during settle
+        // Start wheel at idle immediately; spinning during settle
         setWheelRPM(WHEEL_IDLE_RPM);
 
         // Lift closed until the wheel is ready (runtime movement only)
