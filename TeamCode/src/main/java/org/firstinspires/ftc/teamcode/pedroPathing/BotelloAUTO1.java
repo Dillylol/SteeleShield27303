@@ -29,7 +29,7 @@ public class BotelloAUTO1 extends OpMode {
 
     // ---------------- Hardware ----------------
     private Follower follower;
-    private DcMotorEx Intake, Wheel;
+    private DcMotorEx Intake, Wheel, Wheel2;
     private Servo Lift;
     private DistanceSensor tof;
 
@@ -136,12 +136,17 @@ public class BotelloAUTO1 extends OpMode {
 
         Intake = hardwareMap.get(DcMotorEx.class, "Intake");
         Wheel  = hardwareMap.get(DcMotorEx.class, "Wheel");
+        Wheel2 = hardwareMap.get(DcMotorEx.class, "Wheel2");
         Lift   = hardwareMap.get(Servo.class,     "Lift");
         tof    = hardwareMap.get(DistanceSensor.class, "TOF");
 
         // Motor directions & behaviors
         Intake.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
         Intake.setDirection(DcMotor.Direction.REVERSE);
+        Wheel.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+        Wheel2.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+        Wheel.setDirection(DcMotor.Direction.REVERSE);
+        Wheel2.setDirection(DcMotor.Direction.REVERSE);
 
         // Build paths
         toShoot      = line(START,       SHOOT_ZONE);
@@ -292,7 +297,7 @@ public class BotelloAUTO1 extends OpMode {
         }
 
         // 2) Simple readiness check with hysteresis
-        double wheelRpm = toRPM(safeVel(Wheel), TPR);
+        double wheelRpm = toRPM(safeAssemblyVel(), TPR);
         if (!ready && wheelRpm >= READY_ON_RPM) ready = true;
         if (ready && wheelRpm <= READY_OFF_RPM) ready = false;
 
@@ -357,14 +362,27 @@ public class BotelloAUTO1 extends OpMode {
         targetRpm = Math.max(0, rpm);
         // If you have RUN_USING_ENCODER+PIDF, replace this with setVelocity(tps) using TPR.
         double pwr = (rpm <= 0) ? 0.0 : clamp(rpm / WHEEL_MAX_RPM, 0.0, 1.0);
-        Wheel.setPower(pwr);
+        setWheelPower(pwr);
         wheelOn = pwr > 0.02;
     }
 
     // ---------------- Scan utils ----------------
     private void beginScan() { Arrays.fill(scan, 0.0); scanLeft = Math.min(SCAN_SAMPLES, scan.length); }
 
-    private static double safeVel(DcMotorEx m) { try { return m.getVelocity(); } catch (Exception e) { return 0.0; } }
+    private void setWheelPower(double power) {
+        Wheel.setPower(power);
+        if (Wheel2 != null) {
+            Wheel2.setPower(power);
+        }
+    }
+
+    private double safeAssemblyVel() {
+        double v1 = safeVel(Wheel);
+        double v2 = safeVel(Wheel2);
+        return (Wheel2 != null) ? 0.5 * (v1 + v2) : v1;
+    }
+
+    private static double safeVel(DcMotorEx m) { if (m == null) { return 0.0; } try { return m.getVelocity(); } catch (Exception e) { return 0.0; } }
     private static double toRPM(double ticksPerSec, double ticksPerRev) { return (ticksPerRev <= 0) ? 0.0 : (ticksPerSec / ticksPerRev) * 60.0; }
     private static double safeTofInches(DistanceSensor ds) {
         try {

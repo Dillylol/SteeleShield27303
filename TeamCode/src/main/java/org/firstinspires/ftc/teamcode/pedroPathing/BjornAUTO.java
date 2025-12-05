@@ -67,6 +67,7 @@ public class BjornAUTO extends OpMode {
     // Hardware
     private DcMotorEx Intake;
     private DcMotorEx Wheel;
+    private DcMotorEx Wheel2;
     private Servo     Lift;
 
     // Panels
@@ -91,13 +92,16 @@ public class BjornAUTO extends OpMode {
 
         Intake = hardwareMap.get(DcMotorEx.class, "Intake");
         Wheel  = hardwareMap.get(DcMotorEx.class, "Wheel");
+        Wheel2 = hardwareMap.get(DcMotorEx.class, "Wheel2");
         Lift   = hardwareMap.get(Servo.class,     "Lift");
 
         DcMotor.ZeroPowerBehavior brake = DcMotor.ZeroPowerBehavior.BRAKE;
         Intake.setZeroPowerBehavior(brake);
         Wheel.setZeroPowerBehavior(brake);
+        Wheel2.setZeroPowerBehavior(brake);
         Intake.setDirection(DcMotor.Direction.REVERSE);
         Wheel.setDirection(DcMotor.Direction.REVERSE);
+        Wheel2.setDirection(DcMotor.Direction.REVERSE);
 
         liftRaised = false;
 
@@ -164,7 +168,7 @@ public class BjornAUTO extends OpMode {
             case P2_ALL:
                 if (follower.atParametricEnd()) {
                     Intake.setPower(0.0);                  // wait until wheel is truly at speed
-                    Wheel.setPower(WHEEL_POWER_SHOOT);
+                    setWheelPower(WHEEL_POWER_SHOOT);
                     // reset delay flags
                     intakeDelayedStarted = false;
                     liftRaisedAtMs = -1L;
@@ -173,7 +177,7 @@ public class BjornAUTO extends OpMode {
                 break;
 
             case SPINUP_AND_LIFT: {
-                double rpm = toRPM(safeVel(Wheel), WHEEL_TPR);
+                double rpm = toRPM(safeAssemblyVel(), WHEEL_TPR);
                 long now = System.currentTimeMillis();
 
                 if (!liftRaised && rpm >= WHEEL_READY_ON_RPM) {
@@ -199,7 +203,7 @@ public class BjornAUTO extends OpMode {
 
             case DONE:
                 Intake.setPower(0.0);
-                Wheel.setPower(0.0);
+                setWheelPower(0.0);
                 break;
         }
     }
@@ -210,7 +214,7 @@ public class BjornAUTO extends OpMode {
         if (poseHistory.size() >= HISTORY_LIMIT) poseHistory.pollFirst();
         poseHistory.addLast(new Pose(p.getX(), p.getY(), p.getHeading()));
 
-        double wheelRpm = toRPM(safeVel(Wheel), WHEEL_TPR);
+        double wheelRpm = toRPM(safeAssemblyVel(), WHEEL_TPR);
         panels.addData("State", state);
         panels.addData("Pose", fmtPose(p));
         panels.addData("Wheel_RPM", wheelRpm);
@@ -235,6 +239,19 @@ public class BjornAUTO extends OpMode {
         try { follower.setMaxPower(pwr); } catch (Throwable ignored) {}
     }
 
+    private void setWheelPower(double power) {
+        Wheel.setPower(power);
+        if (Wheel2 != null) {
+            Wheel2.setPower(power);
+        }
+    }
+
+    private double safeAssemblyVel() {
+        double v1 = safeVel(Wheel);
+        double v2 = safeVel(Wheel2);
+        return (Wheel2 != null) ? 0.5 * (v1 + v2) : v1;
+    }
+
     private PathChain buildLine(Pose a, Pose b, double hA, double hB) {
         return follower.pathBuilder()
                 .addPath(new BezierLine(a, b))
@@ -257,6 +274,9 @@ public class BjornAUTO extends OpMode {
     }
 
     private static double safeVel(DcMotorEx m) {
+        if (m == null) {
+            return 0.0;
+        }
         try { return m.getVelocity(); } catch (Exception e) { return 0.0; }
     }
 

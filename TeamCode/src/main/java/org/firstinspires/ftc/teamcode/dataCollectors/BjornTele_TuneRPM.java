@@ -10,6 +10,7 @@ import com.qualcomm.robotcore.hardware.DistanceSensor;
 import com.qualcomm.robotcore.hardware.IMU;
 import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.hardware.VoltageSensor;
+
 import org.firstinspires.ftc.robotcore.external.Telemetry;
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
 
@@ -20,7 +21,7 @@ public class BjornTele_TuneRPM extends OpMode {
     private DcMotor FrontL, FrontR, BackL, BackR;
 
     // ---------- MECHS ----------
-    private DcMotorEx Intake, Wheel;   // read velocity from Wheel
+    private DcMotorEx Intake, Wheel, Wheel2;   // read velocity from Wheel
     private Servo Lift;
     private DistanceSensor tofFront;
 
@@ -84,6 +85,7 @@ public class BjornTele_TuneRPM extends OpMode {
 
         Intake = hardwareMap.get(DcMotorEx.class, "Intake");
         Wheel  = hardwareMap.get(DcMotorEx.class, "Wheel");
+        Wheel2 = hardwareMap.get(DcMotorEx.class, "Wheel2");
         Lift   = hardwareMap.get(Servo.class, "Lift");
         tofFront = hardwareMap.get(DistanceSensor.class, "TOF");
 
@@ -93,7 +95,8 @@ public class BjornTele_TuneRPM extends OpMode {
         FrontR.setDirection(DcMotor.Direction.REVERSE);
         BackR.setDirection(DcMotor.Direction.REVERSE);
         Intake.setDirection(DcMotor.Direction.REVERSE);
-       // Wheel.setDirection(DcMotor.Direction.REVERSE);
+        Wheel.setDirection(DcMotor.Direction.REVERSE);
+        Wheel2.setDirection(DcMotor.Direction.REVERSE);
 
         DcMotor.ZeroPowerBehavior brake = DcMotor.ZeroPowerBehavior.BRAKE;
         FrontL.setZeroPowerBehavior(brake);
@@ -101,9 +104,13 @@ public class BjornTele_TuneRPM extends OpMode {
         BackL.setZeroPowerBehavior(brake);
         BackR.setZeroPowerBehavior(brake);
         Intake.setZeroPowerBehavior(brake);
+        Wheel.setZeroPowerBehavior(brake);
+        Wheel2.setZeroPowerBehavior(brake);
 
         Wheel.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+        Wheel2.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
         Wheel.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        Wheel2.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
 
         // No lift motion in init
         try { Lift.setPosition(0.10); } catch (Exception ignored) {}
@@ -155,8 +162,8 @@ public class BjornTele_TuneRPM extends OpMode {
 
         // B toggles ON/OFF, RB/LB => fine +/-; DPAD up/down => coarse +/-
         if (edgeDownB()) {
-            if (Wheel.getPower() > 0.01 || Wheel.getVelocity() > 1) {
-                Wheel.setPower(0);
+            if (isOn()) {
+                setWheelPower(0);
                 spinupStartTime = -1.0; // stop: cancel warmup
             } else {
                 holdRPM(targetWheelRPM);
@@ -169,7 +176,7 @@ public class BjornTele_TuneRPM extends OpMode {
         if (edgeDownDDown()) { adjustTarget(-STEP_COARSE); if (isOn()) holdRPM(targetWheelRPM); }
 
         // ---------- 4) MEASUREMENTS ----------
-        final double wheelTps = safeVel(Wheel);
+        final double wheelTps = safeAssemblyVel();
         final double wheelRpm = toRPM(wheelTps, WHEEL_TPR);
 
         double dt = Math.max(1e-3, now - lastSampleTime);
@@ -301,17 +308,73 @@ public class BjornTele_TuneRPM extends OpMode {
     }
 
     // ---------- Helpers ----------
-    private boolean isOn() { return Wheel.getPower() > 0.01 || Wheel.getVelocity() > 1; }
-    private void holdRPM(double rpm) {
-        if (Wheel.getMode() != DcMotor.RunMode.RUN_USING_ENCODER) {
-            Wheel.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+    private boolean isOn() { return isMotorActive(Wheel) || isMotorActive(Wheel2); }
+    private boolean isMotorActive(DcMotorEx motor) {
+        if (motor == null) {
+            return false;
         }
+        try {
+            return motor.getPower() > 0.01 || motor.getVelocity() > 1;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+    private void holdRPM(double rpm) {
+        ensureRunUsingEncoder(Wheel);
+        ensureRunUsingEncoder(Wheel2);
         double v = getBatteryVoltage();
         double scale = 12.5 / Math.max(10.0, v);
         double tps = (rpm / 60.0) * WHEEL_TPR * scale;
-        Wheel.setVelocity(tps);
+        setWheelVelocity(tps);
     }
-    private static double safeVel(DcMotorEx m) { try { return m.getVelocity(); } catch (Exception e) { return 0.0; } }
+    private void setWheelPower(double power) {
+        setPowerSafe(Wheel, power);
+        setPowerSafe(Wheel2, power);
+    }
+
+    private void setWheelVelocity(double ticksPerSecond) {
+        setVelocitySafe(Wheel, ticksPerSecond);
+        setVelocitySafe(Wheel2, ticksPerSecond);
+    }
+
+    private void ensureRunUsingEncoder(DcMotorEx motor) {
+        if (motor != null && motor.getMode() != DcMotor.RunMode.RUN_USING_ENCODER) {
+            motor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        }
+    }
+
+    private double safeAssemblyVel() {
+        double v1 = safeVel(Wheel);
+        double v2 = safeVel(Wheel2);
+        return (Wheel2 != null) ? 0.5 * (v1 + v2) : v1;
+    }
+
+    private static double safeVel(DcMotorEx m) {
+        if (m == null) {
+            return 0.0;
+        }
+        try { return m.getVelocity(); } catch (Exception e) { return 0.0; }
+    }
+
+    private static void setPowerSafe(DcMotorEx motor, double power) {
+        if (motor == null) {
+            return;
+        }
+        try {
+            motor.setPower(power);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static void setVelocitySafe(DcMotorEx motor, double ticksPerSecond) {
+        if (motor == null) {
+            return;
+        }
+        try {
+            motor.setVelocity(ticksPerSecond);
+        } catch (Exception ignored) {
+        }
+    }
     private static double toRPM(double tps, double tpr) { return (tpr <= 0) ? 0.0 : (tps / tpr) * 60.0; }
     private static double clamp(double v, double lo, double hi) { return Math.max(lo, Math.min(hi, v)); }
     private double getBatteryVoltage() {

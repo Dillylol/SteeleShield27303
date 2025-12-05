@@ -20,7 +20,7 @@ public class BotelloDATA extends OpMode {
     private DcMotor BackL, BackR, FrontL, FrontR;
 
     // Mechanisms (use DcMotorEx so we can read velocity)
-    private DcMotorEx Intake, Wheel;
+    private DcMotorEx Intake, Wheel, Wheel2;
 
     // Auto-lift servo (stays lowered, lifts only when wheel velocity >= threshold)
     private Servo Lift;
@@ -77,6 +77,7 @@ public class BotelloDATA extends OpMode {
         // Map mechanisms as DcMotorEx
         Intake = hardwareMap.get(DcMotorEx.class, "Intake");
         Wheel  = hardwareMap.get(DcMotorEx.class, "Wheel");
+        Wheel2 = hardwareMap.get(DcMotorEx.class, "Wheel2");
 
         // Map servo
         Lift   = hardwareMap.get(Servo.class, "Lift");
@@ -89,6 +90,7 @@ public class BotelloDATA extends OpMode {
 
         Intake.setDirection(DcMotor.Direction.REVERSE);
         Wheel.setDirection(DcMotor.Direction.REVERSE);
+        Wheel2.setDirection(DcMotor.Direction.REVERSE);
 
         // Brakes
         DcMotor.ZeroPowerBehavior brake = DcMotor.ZeroPowerBehavior.BRAKE;
@@ -99,10 +101,13 @@ public class BotelloDATA extends OpMode {
         Intake.setZeroPowerBehavior(brake);
         // Wheel: RUN_USING_ENCODER + setVelocity handles holding; BRAKE is fine here too
         Wheel.setZeroPowerBehavior(brake);
+        Wheel2.setZeroPowerBehavior(brake);
 
         // Use encoders for velocity control
         Wheel.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+        Wheel2.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
         Wheel.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        Wheel2.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
 
         // (Optional) You can tune PIDF here if needed (SDK default is usually OK)
         // Wheel.setVelocityPIDFCoefficients(kP, kI, kD, kF);
@@ -181,18 +186,17 @@ public class BotelloDATA extends OpMode {
         startPrev = gamepad1.start;
 
         // ===== Apply hold or stop =====
-        final double wheelTps  = safeVel(Wheel);
+        final double wheelTps  = safeAssemblyVel();
         final double wheelRpm  = toRPM(wheelTps, WHEEL_TPR);
 
         if (isWheelOn) {
             // Ensure RUN_USING_ENCODER for velocity control
-            if (Wheel.getMode() != DcMotor.RunMode.RUN_USING_ENCODER) {
-                Wheel.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
-            }
+            ensureRunUsingEncoder(Wheel);
+            ensureRunUsingEncoder(Wheel2);
             double targetTps = (targetWheelRPM / 60.0) * WHEEL_TPR;
-            Wheel.setVelocity(targetTps);  // built-in PIDF holds TPS
+            setWheelVelocity(targetTps);  // built-in PIDF holds TPS
         } else {
-            Wheel.setPower(0.0);
+            setWheelPower(0.0);
         }
 
         // ===== Auto-Lift Servo based on Wheel velocity =====
@@ -233,8 +237,45 @@ public class BotelloDATA extends OpMode {
         return Math.max(lo, Math.min(hi, v));
     }
 
+    private void setWheelPower(double power) {
+        Wheel.setPower(power);
+        if (Wheel2 != null) {
+            Wheel2.setPower(power);
+        }
+    }
+
+    private void setWheelVelocity(double ticksPerSecond) {
+        setVelocitySafe(Wheel, ticksPerSecond);
+        setVelocitySafe(Wheel2, ticksPerSecond);
+    }
+
+    private void ensureRunUsingEncoder(DcMotorEx motor) {
+        if (motor != null && motor.getMode() != DcMotor.RunMode.RUN_USING_ENCODER) {
+            motor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        }
+    }
+
+    private double safeAssemblyVel() {
+        double v1 = safeVel(Wheel);
+        double v2 = safeVel(Wheel2);
+        return (Wheel2 != null) ? 0.5 * (v1 + v2) : v1;
+    }
+
     private static double safeVel(DcMotorEx m) {
+        if (m == null) {
+            return 0.0;
+        }
         try { return m.getVelocity(); } catch (Exception e) { return 0.0; }
+    }
+
+    private static void setVelocitySafe(DcMotorEx motor, double ticksPerSecond) {
+        if (motor == null) {
+            return;
+        }
+        try {
+            motor.setVelocity(ticksPerSecond);
+        } catch (Exception ignored) {
+        }
     }
 
     private static double toRPM(double tps, double tpr) {

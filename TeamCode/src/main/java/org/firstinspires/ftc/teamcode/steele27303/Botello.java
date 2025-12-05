@@ -8,7 +8,7 @@ import com.qualcomm.robotcore.hardware.DcMotorSimple;
 @TeleOp(name = "Botello")
 public class Botello extends OpMode {
 
-    private DcMotor BackL, BackR, FrontL, FrontR, Intake, Wheel;
+    private DcMotor BackL, BackR, FrontL, FrontR, Intake, Wheel, Wheel2;
 
     // --- Boolean Toggle Variables ---
     private boolean isIntakeOn = false;
@@ -24,7 +24,8 @@ public class Botello extends OpMode {
         FrontL = hardwareMap.get(DcMotor.class, "FrontL");
         FrontR = hardwareMap.get(DcMotor.class, "FrontR");
         Intake = hardwareMap.get(DcMotor.class, "Intake");
-        Wheel = hardwareMap.get(DcMotor.class, "Wheel");
+        Wheel  = hardwareMap.get(DcMotor.class, "Wheel");
+        Wheel2 = hardwareMap.get(DcMotor.class, "Wheel2");
 
         // --- Corrected Motor Directions ---
         // For a typical mecanum drive, you reverse the motors on one side.
@@ -35,6 +36,7 @@ public class Botello extends OpMode {
         BackR.setDirection(DcMotor.Direction.REVERSE);
         Intake.setDirection(DcMotorSimple.Direction.REVERSE);
         Wheel.setDirection(DcMotorSimple.Direction.REVERSE);
+        Wheel2.setDirection(DcMotorSimple.Direction.REVERSE);
 
         DcMotor.ZeroPowerBehavior brake = DcMotor.ZeroPowerBehavior.BRAKE;
         BackL.setZeroPowerBehavior(brake);
@@ -43,6 +45,7 @@ public class Botello extends OpMode {
         FrontR.setZeroPowerBehavior(brake);
         Intake.setZeroPowerBehavior(brake);
         Wheel.setZeroPowerBehavior(brake);
+        Wheel2.setZeroPowerBehavior(brake);
     }
 
     @Override
@@ -94,11 +97,7 @@ public class Botello extends OpMode {
         }
         bWasPressed = gamepad1.b;
 
-        if (isWheelOn) {
-            Wheel.setPower(1);
-        } else {
-            Wheel.setPower(0);
-        }
+        setWheelPower(isWheelOn ? 1 : 0);
 
         // --- Telemetry for Debugging ---
         telemetry.addData("Intake Status", isIntakeOn ? "ON" : "OFF");
@@ -107,6 +106,13 @@ public class Botello extends OpMode {
         telemetry.addData("Gamepad 'a' button pressed", gamepad1.a);
         telemetry.addData("Gamepad 'b' button pressed", gamepad1.b);
         telemetry.update();
+    }
+
+    private void setWheelPower(double power) {
+        Wheel.setPower(power);
+        if (Wheel2 != null) {
+            Wheel2.setPower(power);
+        }
     }
 }
 //Certified Dylen Vasquez Design

@@ -11,8 +11,8 @@ import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.DistanceSensor;
 import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.hardware.VoltageSensor;
+
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
-import org.firstinspires.ftc.robotcore.external.Telemetry;
 
 import java.util.Arrays;
 
@@ -28,7 +28,7 @@ import java.util.Arrays;
 public class BjornAUTO2_DualStage extends OpMode {
     // ---------------- Hardware ----------------
     private Follower follower;
-    private DcMotorEx Intake, Wheel;
+    private DcMotorEx Intake, Wheel, Wheel2;
     private Servo Lift;
     private DistanceSensor tof;
 
@@ -125,13 +125,16 @@ public class BjornAUTO2_DualStage extends OpMode {
 
         Intake = hardwareMap.get(DcMotorEx.class, "Intake");
         Wheel  = hardwareMap.get(DcMotorEx.class, "Wheel");
+        Wheel2 = hardwareMap.get(DcMotorEx.class, "Wheel2");
         Lift   = hardwareMap.get(Servo.class,     "Lift");
         tof    = hardwareMap.get(DistanceSensor.class, "TOF");
 
         Intake.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
         Wheel.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+        Wheel2.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
         Intake.setDirection(DcMotor.Direction.REVERSE);
-        //Wheel.setDirection(DcMotor.Direction.REVERSE);
+        Wheel.setDirection(DcMotor.Direction.REVERSE);
+        Wheel2.setDirection(DcMotor.Direction.REVERSE);
 
         // Build latest paths
         toShoot      = line(START,       SHOOT_ZONE);
@@ -212,7 +215,7 @@ public class BjornAUTO2_DualStage extends OpMode {
         }
 
         // Telemetry
-        final double wheelTps  = safeVel(Wheel);
+        final double wheelTps  = safeAssemblyVel();
         final double wheelRpm  = toRPM(wheelTps, WHEEL_TPR);
         telemetry.addData("State", state);
         telemetry.addData("WheelMode", wheelMode);
@@ -256,7 +259,7 @@ public class BjornAUTO2_DualStage extends OpMode {
         }
 
         // 2) Update wheel control (dual‑stage)
-        final double wheelTps  = safeVel(Wheel);
+        final double wheelTps  = safeAssemblyVel();
         final double measRPM   = toRPM(wheelTps, WHEEL_TPR);
         final boolean inBand   = Math.abs(measRPM - dynTargetRPM) <= HANDOVER_BAND_RPM;
 
@@ -266,14 +269,14 @@ public class BjornAUTO2_DualStage extends OpMode {
 
         switch (wheelMode) {
             case OFF:
-                Wheel.setPower(0.0);
+                setWheelPower(0.0);
                 break;
 
             case CHASER: {
                 double chaseRPM = Math.max(CHASER_MIN_RPM, dynTargetRPM - CHASER_OFFSET_RPM);
                 double tps = (chaseRPM / 60.0) * WHEEL_TPR * scale;
                 ensureRunUsingEncoder();
-                Wheel.setVelocity(tps);
+                setWheelVelocity(tps);
 
                 if (inBand) {
                     if (bandEnterMs < 0) bandEnterMs = nowMs;
@@ -291,7 +294,7 @@ public class BjornAUTO2_DualStage extends OpMode {
             case PID_LOCK: {
                 ensureRunUsingEncoder();
                 double tps = (dynTargetRPM / 60.0) * WHEEL_TPR; // handover uses true setpoint (no battery scale)
-                Wheel.setVelocity(tps);
+                setWheelVelocity(tps);
                 if (!inBand) {
                     if (lastBandMissMs < 0) lastBandMissMs = nowMs;
                     if (nowMs - lastBandMissMs > RELOCK_GRACE_MS) {
@@ -336,12 +339,11 @@ public class BjornAUTO2_DualStage extends OpMode {
     // ---------- Wheel helpers ----------
     private void setWheelOff() {
         wheelMode = WheelMode.OFF;
-        Wheel.setPower(0.0);
+        setWheelPower(0.0);
     }
     private void ensureRunUsingEncoder() {
-        if (Wheel.getMode() != DcMotor.RunMode.RUN_USING_ENCODER) {
-            Wheel.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
-        }
+        ensureRunUsingEncoder(Wheel);
+        ensureRunUsingEncoder(Wheel2);
     }
 
     // ---------- Pedro helpers ----------
@@ -363,7 +365,46 @@ public class BjornAUTO2_DualStage extends OpMode {
         Arrays.fill(scan, 0.0);
         scanLeft = SCAN_SAMPLES;
     }
-    private static double safeVel(DcMotorEx m) { try { return m.getVelocity(); } catch (Exception e) { return 0.0; } }
+    private void setWheelPower(double power) {
+        Wheel.setPower(power);
+        if (Wheel2 != null) {
+            Wheel2.setPower(power);
+        }
+    }
+
+    private void setWheelVelocity(double ticksPerSecond) {
+        setVelocitySafe(Wheel, ticksPerSecond);
+        setVelocitySafe(Wheel2, ticksPerSecond);
+    }
+
+    private void ensureRunUsingEncoder(DcMotorEx motor) {
+        if (motor != null && motor.getMode() != DcMotor.RunMode.RUN_USING_ENCODER) {
+            motor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        }
+    }
+
+    private double safeAssemblyVel() {
+        double v1 = safeVel(Wheel);
+        double v2 = safeVel(Wheel2);
+        return (Wheel2 != null) ? 0.5 * (v1 + v2) : v1;
+    }
+
+    private static double safeVel(DcMotorEx m) {
+        if (m == null) {
+            return 0.0;
+        }
+        try { return m.getVelocity(); } catch (Exception e) { return 0.0; }
+    }
+
+    private static void setVelocitySafe(DcMotorEx motor, double ticksPerSecond) {
+        if (motor == null) {
+            return;
+        }
+        try {
+            motor.setVelocity(ticksPerSecond);
+        } catch (Exception ignored) {
+        }
+    }
     private static double toRPM(double tps, double tpr) { return (tpr <= 0) ? 0.0 : (tps / tpr) * 60.0; }
     private static double clamp(double v, double lo, double hi) { return Math.max(lo, Math.min(hi, v)); }
     private static double median(double[] a, int n) {
