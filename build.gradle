@@ -1,0 +1,17 @@
+// build.gradle (Root Project)
+
+buildscript {
+    repositories {
+        mavenCentral()
+        google()
+    }
+    dependencies {
+        // Note for FTC Teams: Do not modify this yourself.
+        classpath 'com.android.tools.build:gradle:8.7.0'
+    }
+}
+
+// The allprojects block below is now empty, as its contents were the cause of the error.
+allprojects {
+    // Repositories are now managed in settings.gradle
+}

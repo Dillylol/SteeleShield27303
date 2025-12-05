@@ -1,0 +1,14 @@
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+        // Add these two lines for pedropathing and bylazar libraries
+        maven { url = 'https://maven.pedropathing.com' }
+        maven { url = "https://mymaven.bylazar.com/releases" }
+        maven { url = 'https://jitpack.io' }
+    }
+}
+
+include ':FtcRobotController'
+include ':TeamCode'
